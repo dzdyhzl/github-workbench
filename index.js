@@ -10,7 +10,8 @@
 
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { isAbsolute, parse, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { isAbsolute, join, parse, resolve } from 'node:path'
 import { writeFileAtomic, withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -40,6 +41,37 @@ function scrubbedParentEnv() {
 }
 
 /**
+ * Fill the standard user-profile environment variables from the OS home
+ * directory when the parent environment lacks them.
+ *
+ * `gh` and `git` locate their configuration (hosts.yml, global gitconfig)
+ * through `USERPROFILE`/`APPDATA` on Windows and `HOME` elsewhere. A host
+ * launched from a stripped environment (a service, a sandboxed shell) can
+ * miss them, which makes `gh auth status` silently answer "not logged in"
+ * even though the user IS signed in, and makes git fail with
+ * "fatal: $HOME not set". `os.homedir()` keeps working in that case, so it
+ * is the reliable source to restore the variables from.
+ */
+function withProfileEnv(env) {
+  let home
+  try { home = homedir() } catch { return env }
+  if (typeof home !== 'string' || home === '' || !isAbsolute(home)) return env
+  if (process.platform === 'win32') {
+    const drive = home.slice(0, 2)
+    return {
+      ...env,
+      ...(env.USERPROFILE === undefined ? { USERPROFILE: home } : {}),
+      ...(env.HOME === undefined ? { HOME: home } : {}),
+      ...(env.HOMEDRIVE === undefined && /^[A-Za-z]:$/.test(drive) ? { HOMEDRIVE: drive } : {}),
+      ...(env.HOMEPATH === undefined ? { HOMEPATH: home.slice(2) } : {}),
+      ...(env.APPDATA === undefined ? { APPDATA: join(home, 'AppData', 'Roaming') } : {}),
+      ...(env.LOCALAPPDATA === undefined ? { LOCALAPPDATA: join(home, 'AppData', 'Local') } : {}),
+    }
+  }
+  return { ...env, ...(env.HOME === undefined ? { HOME: home } : {}) }
+}
+
+/**
  * Run one `gh` command to completion with a scrubbed environment.
  * Resolves `{ exitCode, stdout, stderr }`; rejects when `gh` cannot start.
  */
@@ -48,7 +80,7 @@ function runGh(args, timeoutMs = GH_TIMEOUT_MS) {
     let child
     try {
       child = spawn('gh', args, {
-        env: { ...scrubbedParentEnv(), GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_PAGER: '', NO_COLOR: '1', CLICOLOR: '0' },
+        env: { ...withProfileEnv(scrubbedParentEnv()), GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_PAGER: '', NO_COLOR: '1', CLICOLOR: '0' },
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
@@ -474,7 +506,7 @@ function run(argv) {
     let child
     try {
       child = spawn(argv[0], argv.slice(1), {
-        env: scrubbedParentEnv(),
+        env: withProfileEnv(scrubbedParentEnv()),
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       })

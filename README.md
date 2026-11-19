@@ -23,3 +23,21 @@ Declined-workspace records persist to the fixed JSON file `~/.dsh/github-workben
 
 - GitHub CLI (`gh`) installed on the host; account(s) signed in with `gh auth login`.
 - Repository creation and account switching run real `gh` commands on the host; no token is read or stored by this plugin.
+
+## Environment robustness
+
+`gh` and `git` find their configuration (`hosts.yml`, global gitconfig) through
+`USERPROFILE`/`APPDATA` on Windows and `HOME` elsewhere. When the Harness host is
+launched from a stripped environment, those variables can be missing, and the
+failure mode is misleading: `gh auth status` silently answers "You are not
+logged into any GitHub hosts" even though the user is signed in, and git fails
+with `fatal: $HOME not set`.
+
+Every `gh` and `git` child this plugin spawns therefore goes through
+`withProfileEnv` (`index.js`), which restores the missing standard profile
+variables from `os.homedir()` — the one call that keeps working in a stripped
+environment — before inheriting the (sensitive-scrubbed) parent environment.
+The detection gate can no longer report a false "not signed in" for this
+reason, and `gh` no longer writes stray state (`.local/state/gh/`) into the
+current working directory when it cannot resolve its real config home.
+

@@ -400,6 +400,28 @@ export class GithubWorkbenchService extends TypertRemoteService {
     return { owner, name, url, linked: true, followUp: ['git push -u origin main  # after your first commit'] }
   }
 
+  /**
+   * Change a repository's visibility after the client confirmed. The newer
+   * gh CLI refuses `repo edit --visibility` without the consequences flag;
+   * pass it unconditionally (old versions ignore unknown flags badly only
+   * for removed flags, and this one is additive since gh 2.56).
+   */
+  async setVisibility(request) {
+    const owner = String(request?.owner ?? '').trim()
+    const name = String(request?.name ?? '').trim()
+    const visibility = request?.visibility === 'public' ? 'public'
+      : request?.visibility === 'private' ? 'private' : ''
+    if (owner === '' || name === '' || /[^\w.-]/.test(name)) {
+      throw new RemoteError('github-workbench/invalid-repository', 'a repository owner and a plain repository name are required', {})
+    }
+    if (visibility === '') {
+      throw new RemoteError('github-workbench/invalid-visibility', 'visibility must be \'public\' or \'private\'', { visibility: String(request?.visibility ?? '') })
+    }
+    const result = await runGh(['repo', 'edit', `${owner}/${name}`, '--visibility', visibility, '--accept-visibility-change-consequences'], 30_000)
+    if (result.exitCode !== 0) ghFailure(`repo edit ${owner}/${name}`, result)
+    return { owner, name, visibility }
+  }
+
   // ------------------------------------------------------------- declined
 
   /** Read one account's declined workspaces. */
@@ -545,6 +567,7 @@ markRemote(GithubWorkbenchService.prototype, 'switchAccount')
 markRemote(GithubWorkbenchService.prototype, 'repositories')
 markRemote(GithubWorkbenchService.prototype, 'createRepository')
 markRemote(GithubWorkbenchService.prototype, 'linkExisting')
+markRemote(GithubWorkbenchService.prototype, 'setVisibility')
 markRemote(GithubWorkbenchService.prototype, 'localOrigins')
 markRemote(GithubWorkbenchService.prototype, 'declinedList')
 markRemote(GithubWorkbenchService.prototype, 'declinedSetRemark')

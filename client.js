@@ -100,6 +100,15 @@ window.__ModuleLoader__.load({
       close: '关闭',
       remarkFailed: '操作失败：{message}',
       storePathLabel: '数据文件',
+      visibilityAction: '可见性',
+      visibilityChangeTitle: '修改仓库可见性',
+      visibilityChangeToPublic: '将 {owner}/{name} 从私有改为公开？',
+      visibilityChangeToPrivate: '将 {owner}/{name} 从公开改为私有？',
+      visibilityChangePublicBody: '公开后，任何人都能查看该仓库的代码、提交与 Issue。',
+      visibilityChangePrivateBody: '私有后，该仓库仅你和被授权的协作者可见；已绑定的 GitHub Pages 站点会下线，公开链接将失效。',
+      visibilityChangeConfirm: '确认修改',
+      visibilityChanged: '可见性已更新：{owner}/{name} 现为{visibility}',
+      visibilityNoPermission: '没有管理权限，无法修改可见性',
     }
 
     const en = {
@@ -185,6 +194,15 @@ window.__ModuleLoader__.load({
       close: 'Close',
       remarkFailed: 'Operation failed: {message}',
       storePathLabel: 'Data file',
+      visibilityAction: 'Visibility',
+      visibilityChangeTitle: 'Change repository visibility',
+      visibilityChangeToPublic: 'Make {owner}/{name} public?',
+      visibilityChangeToPrivate: 'Make {owner}/{name} private?',
+      visibilityChangePublicBody: 'Once public, anyone can view the code, commits, and issues of this repository.',
+      visibilityChangePrivateBody: 'Once private, only you and authorized collaborators can see it; attached GitHub Pages sites go offline and public links stop working.',
+      visibilityChangeConfirm: 'Change visibility',
+      visibilityChanged: 'Visibility updated: {owner}/{name} is now {visibility}',
+      visibilityNoPermission: 'No admin permission; visibility cannot be changed',
     }
 
     function makeT(locale) {
@@ -273,6 +291,9 @@ window.__ModuleLoader__.load({
 .gwb-card-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 3px; font-size: 12px; color: var(--dsw-alias-label-secondary); }
 .gwb-badge { border-radius: 999px; padding: 1px 8px; font-size: 11px; border: 0.5px solid var(--dsw-alias-border-l3); color: var(--dsw-alias-label-secondary); white-space: nowrap; }
 .gwb-badge-linked { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent); color: var(--dsw-alias-state-success-primary); border-color: transparent; }
+.gwb-visibility-btn { cursor: pointer; font: inherit; font-size: 11px; background: var(--dsw-alias-bg-layer-3, transparent); }
+.gwb-visibility-btn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.gwb-visibility-btn:disabled { cursor: default; opacity: 0.6; }
 .gwb-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .gwb-table th { text-align: left; font-weight: 500; color: var(--dsw-alias-label-tertiary); padding: 6px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); white-space: nowrap; }
 .gwb-table td { padding: 8px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l2); vertical-align: middle; }
@@ -538,6 +559,7 @@ window.__ModuleLoader__.load({
       const [createTarget, setCreateTarget] = useState(null)
       const [removeTarget, setRemoveTarget] = useState(null)
       const [templateTarget, setTemplateTarget] = useState(null)
+      const [visibilityTarget, setVisibilityTarget] = useState(null)
       const [toast, setToast] = useState(null)
       const [switchConfirmedOnce, setSwitchConfirmedOnce] = useState(false)
       const [candidateRequest, setCandidateRequest] = useState(null)
@@ -702,6 +724,22 @@ window.__ModuleLoader__.load({
         }
       }, [api, accountKey, loadDeclined, t])
 
+      // The confirm modal flips this to the requested value; a running change
+      // disables the card so a double click cannot stack two gh calls.
+      const applyVisibility = useCallback(async (repo, next) => {
+        const previous = repo.private ? 'private' : 'public'
+        if (previous === next) return
+        setRepos(list => list.map(item => repoKey(item) === repoKey(repo) ? { ...item, private: next === 'private', visibility: next === 'private' ? 'PRIVATE' : 'PUBLIC' } : item))
+        try {
+          await api.setVisibility({ owner: repo.owner, name: repo.name, visibility: next })
+          setToast(t('visibilityChanged', { owner: repo.owner, name: repo.name, visibility: t(next === 'private' ? 'visibilityPrivate' : 'visibilityPublic') }))
+        } catch (error) {
+          // Roll the optimistic update back and surface the reason.
+          setRepos(list => list.map(item => repoKey(item) === repoKey(repo) ? { ...item, private: previous === 'private', visibility: previous === 'private' ? 'PRIVATE' : 'PUBLIC' } : item))
+          setToast(t('createFailed', { message: error?.message ?? String(error) }))
+        }
+      }, [api, t])
+
       if (status.phase === 'loading') {
         return h('section', { className: 'gwb-page', 'data-github-workbench-page': true }, h(Styles), h('div', { className: 'gwb-gate' }, h(Spinner), h('p', null, t('loading'))))
       }
@@ -778,7 +816,12 @@ window.__ModuleLoader__.load({
                     h('div', { className: 'gwb-card-name' }, repo.fullName),
                     h('div', { className: 'gwb-card-meta' },
                       h('span', { className: 'gwb-badge' }, t(categoryKey(repoCategory(repo)))),
-                      h('span', { className: 'gwb-badge' }, t(repo.private ? 'visibilityPrivate' : 'visibilityPublic')),
+                      h('button', {
+                        className: 'gwb-badge gwb-visibility-btn',
+                        title: t('visibilityAction'),
+                        disabled: !(repo.permissions?.admin ?? false),
+                        onClick: event => { event.stopPropagation(); setVisibilityTarget(repo) },
+                      }, t(repo.private ? 'visibilityPrivate' : 'visibilityPublic')),
                       repo.updatedAt !== null ? h('span', null, t('updated', { time: formatDate(repo.updatedAt) })) : null,
                     ),
                   ),
@@ -880,6 +923,20 @@ window.__ModuleLoader__.load({
           ],
         }, h('pre', { className: 'gwb-pre' }, PROMPT_TEMPLATE_ZH)),
 
+        visibilityTarget !== null && h(Modal, {
+          title: t('visibilityChangeTitle'), onClose: () => setVisibilityTarget(null),
+          footer: [
+            h('button', { key: 'cancel', className: 'gwb-btn', onClick: () => setVisibilityTarget(null) }, t('cancel')),
+            h('button', {
+              key: 'ok', className: 'gwb-btn gwb-btn-primary',
+              onClick: () => { const repo = visibilityTarget; const next = repo.private ? 'public' : 'private'; setVisibilityTarget(null); void applyVisibility(repo, next) },
+            }, t('visibilityChangeConfirm')),
+          ],
+        },
+          h('p', null, t(visibilityTarget.private ? 'visibilityChangeToPrivate' : 'visibilityChangeToPublic', { owner: visibilityTarget.owner, name: visibilityTarget.name })),
+          h('p', null, t(visibilityTarget.private ? 'visibilityChangePublicBody' : 'visibilityChangePrivateBody')),
+        ),
+
         toast !== null && h(Toast, { text: toast, onDone: () => setToast(null) }),
       )
     }
@@ -944,6 +1001,9 @@ window.__ModuleLoader__.load({
         'githubWorkbench/linkExisting': method('githubWorkbench',
           'Point a workspace origin at an existing repository.',
           [{ name: 'request', description: 'cwd, owner, and name.', source: 'json', codec: requestJson }]),
+        'githubWorkbench/setVisibility': method('githubWorkbench',
+          'Change a repository visibility after the user confirmed.',
+          [{ name: 'request', description: 'owner, name, and visibility.', source: 'json', codec: requestJson }]),
         'githubWorkbench/localOrigins': method('githubWorkbench',
           'Read each workspace remote origin and classify it against github.com.',
           [{ name: 'workspaces', description: 'Workspace roster of workspaceId and path.', source: 'json', codec: workspacesJson }]),
@@ -1046,6 +1106,7 @@ window.__ModuleLoader__.load({
         repositories: (page, perPage) => call('repositories', page, perPage),
         createRepository: request => call('createRepository', request),
         linkExisting: request => call('linkExisting', request),
+        setVisibility: request => call('setVisibility', request),
         localOrigins: workspaces => call('localOrigins', workspaces),
         declinedList: account => call('declinedList', account),
         declinedSetRemark: (account, path, remark) => call('declinedSetRemark', account, path, remark),

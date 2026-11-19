@@ -291,9 +291,9 @@ window.__ModuleLoader__.load({
 .gwb-card-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 3px; font-size: 12px; color: var(--dsw-alias-label-secondary); }
 .gwb-badge { border-radius: 999px; padding: 1px 8px; font-size: 11px; border: 0.5px solid var(--dsw-alias-border-l3); color: var(--dsw-alias-label-secondary); white-space: nowrap; }
 .gwb-badge-linked { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent); color: var(--dsw-alias-state-success-primary); border-color: transparent; }
-.gwb-visibility-btn { cursor: pointer; font: inherit; font-size: 11px; background: var(--dsw-alias-bg-layer-3, transparent); }
-.gwb-visibility-btn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-.gwb-visibility-btn:disabled { cursor: default; opacity: 0.6; }
+.gwb-visibility-btn { cursor: pointer; font: inherit; font-size: 11px; background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 16%, transparent); color: var(--dsw-alias-state-error-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent); }
+.gwb-visibility-btn:hover { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 32%, transparent); color: var(--dsw-alias-state-error-primary); }
+.gwb-visibility-btn:disabled { cursor: default; opacity: 0.45; background: var(--dsw-alias-bg-layer-3, transparent); color: var(--dsw-alias-label-tertiary); border-color: var(--dsw-alias-border-l3); }
 .gwb-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .gwb-table th { text-align: left; font-weight: 500; color: var(--dsw-alias-label-tertiary); padding: 6px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); white-space: nowrap; }
 .gwb-table td { padding: 8px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l2); vertical-align: middle; }
@@ -821,7 +821,7 @@ window.__ModuleLoader__.load({
                         title: t('visibilityAction'),
                         disabled: !(repo.permissions?.admin ?? false),
                         onClick: event => { event.stopPropagation(); setVisibilityTarget(repo) },
-                      }, t(repo.private ? 'visibilityPrivate' : 'visibilityPublic')),
+                      }, '\u270E ', t(repo.private ? 'visibilityPrivate' : 'visibilityPublic')),
                       repo.updatedAt !== null ? h('span', null, t('updated', { time: formatDate(repo.updatedAt) })) : null,
                     ),
                   ),

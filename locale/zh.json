@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "GitHub 仓库工作台",
+    "description": "左侧栏全局页：基于本机 gh CLI，在已登录的 GitHub 账户间切换、浏览当前账户的仓库、按 remote origin 关联本地工作区并打开会话；被拒绝建仓的工作区持久化到 ~/.dsh/github-workbench.json。需要已安装并登录 GitHub CLI（gh）。",
+    "detail": "docs/DETAIL.zh.md"
+  }
+}

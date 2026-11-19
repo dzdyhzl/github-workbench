@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "GitHub repository workbench",
+    "description": "Sidebar global page over the local gh CLI: switch between signed-in GitHub accounts, browse the active account's repositories, link local workspaces by remote origin, and open workspace sessions; declined-repo workspaces persist to ~/.dsh/github-workbench.json. Requires the GitHub CLI (gh) installed and signed in.",
+    "detail": "docs/DETAIL.md"
+  }
+}

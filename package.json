@@ -1,6 +1,6 @@
 {
   "name": "@dsh-local/view-11cbfdbc-7886-4863-a239-bb0858fede55",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "type": "module",
   "description": "GitHub 仓库工作台：左侧栏全局页，依赖本机 gh CLI 枚举已登录账户、浏览当前账户仓库、关联本地工作区并建仓；被拒绝建仓的工作区持久化到 ~/.dsh/github-workbench.json",

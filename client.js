@@ -9,6 +9,7 @@ window.__ModuleLoader__.load({
   id: '@dsh-local/view-11cbfdbc-7886-4863-a239-bb0858fede55',
   factory(require) {
     const React = require('react')
+    const ReactDOM = require('react-dom')
     const h = React.createElement
     const { useState, useEffect, useMemo, useCallback, useRef } = React
 
@@ -368,7 +369,10 @@ window.__ModuleLoader__.load({
         const timer = setTimeout(onDone, 2600)
         return () => clearTimeout(timer)
       }, [text, onDone])
-      return h('div', { className: 'gwb-toast', role: 'status' }, text)
+      return ReactDOM.createPortal(
+        h('div', { className: 'gwb-toast', role: 'status' }, text),
+        document.body,
+      )
     }
 
     function Modal({ title, onClose, children, footer }) {
@@ -377,14 +381,14 @@ window.__ModuleLoader__.load({
         document.addEventListener('keydown', onKey, true)
         return () => document.removeEventListener('keydown', onKey, true)
       }, [onClose])
-      return h('div', {
+      return ReactDOM.createPortal(h('div', {
         className: 'gwb-modal-mask',
         onMouseDown: event => { if (event.target === event.currentTarget) onClose() },
       }, h('div', { className: 'gwb-modal', role: 'dialog', 'aria-modal': true, 'aria-label': title },
         h('h3', null, title),
         children,
         h('div', { className: 'gwb-modal-actions' }, footer),
-      ))
+      )), document.body)
     }
 
     // --------------------------------------------------------------- visuals

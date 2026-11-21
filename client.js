@@ -567,7 +567,7 @@ window.__ModuleLoader__.load({
         setCwd(path)
         if (!nameEdited.current) setName(directoryName(path.trim()))
       }
-      const [description, setDescription] = useState('')
+      const [description, setDescription] = useState(target.description ?? '')
       const [visibility, setVisibility] = useState('private')
       const [phase, setPhase] = useState('form') // form | exists | running | done
       const [existsInfo, setExistsInfo] = useState(null)
@@ -1326,7 +1326,12 @@ window.__ModuleLoader__.load({
           // Not treated as handled: until a repository actually exists and is
           // linked, the next conversation in this directory asks again.
           gateStore.set(null)
-          createRequestStore.set({ cwd: gate.path, name: gate.path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '' })
+          const roster = ctx.get('workspaces')?.list?.getSnapshot()?.items ?? []
+          const workspace = roster.find(item => item.path === gate.path)
+          const description = typeof workspace?.title === 'string' && workspace.title.trim() !== ''
+            ? workspace.title.trim()
+            : undefined
+          createRequestStore.set({ cwd: gate.path, name: gate.path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '', description })
           try { ctx.layout.selectPanel('github-repo-workbench') } catch { /* panel selection is best-effort */ }
         },
         decline: async gate => {

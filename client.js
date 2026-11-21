@@ -1310,8 +1310,13 @@ window.__ModuleLoader__.load({
           // retrying with backoff until a live face answers.
           if (!/404|not found/i.test(String(error?.message ?? error))) throw error
           let lastError = error
-          for (let attempt = 1; attempt <= 5; attempt++) {
-            await new Promise(resolve => setTimeout(resolve, 300 * attempt))
+          // The window also covers a Host that is still starting up (or
+          // reloading this plugin): its /api route only exists once the
+          // Host-side registration lands, which can trail the page by many
+          // seconds after a fresh DSH launch.
+          const backoffs = [300, 600, 900, 1500, 2000, 3000, 4000, 5000]
+          for (let attempt = 0; attempt < backoffs.length; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, backoffs[attempt]))
             // Drop this generation's own registration (never one adopted
             // from another owner) so the next mount registers fresh. Await
             // the teardown: remounting before it settles re-triggers

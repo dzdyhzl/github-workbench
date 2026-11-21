@@ -470,13 +470,18 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (gate === null) return
         const measure = () => {
-          const anchor = document.querySelector('[data-conversation-content]')
-          if (anchor === null) {
-            void fetch(location.origin + '/plugins/' + encodeURIComponent('debug-gate') + '/probe?where=conversation-content-missing').catch(() => {})
-            setRegion(null); return
+          // Preferred: the resident session view wrapper — the chat area only,
+          // never the composer (a sibling [data-composer-seat]) or sidebars.
+          // The [data-chat-following-tail] attribute inside it is conditional,
+          // so anchor on the structural wrapper instead of the view root.
+          let anchor = document.querySelector("[data-slot='conversation.session']")
+          if (anchor === null || anchor.getBoundingClientRect().height < 80) {
+            // Fallback: the whole conversation body (chat + composer).
+            anchor = document.querySelector('[data-conversation-content]')
           }
+          if (anchor === null) { setRegion(null); return }
           const box = anchor.getBoundingClientRect()
-          console.log('[gwb-gate] region', JSON.stringify({ top: box.top, left: box.left, width: box.width, height: box.height }))
+          if (box.width < 80 || box.height < 80) { setRegion(null); return }
           setRegion({ top: box.top, left: box.left, width: box.width, height: box.height })
         }
         measure()
@@ -488,22 +493,7 @@ window.__ModuleLoader__.load({
       }, [gate !== null])
       const styleEl = h('style', { 'data-plugin-css': PKG + '-gate', dangerouslySetInnerHTML: { __html: GATE_CSS } })
       if (gate === null || region === null) return styleEl
-      useEffect(() => {
-        requestAnimationFrame(() => {
-          const el = document.querySelector('.gwb-gate-overlay')
-          if (el === null) return
-          const own = el.getBoundingClientRect()
-          const ancestors = []
-          let node = el.parentElement
-          while (node !== null && ancestors.length < 12) {
-            const cs = getComputedStyle(node)
-            ancestors.push({ tag: node.tagName, cls: String(node.className).slice(0, 60), pos: cs.position, transform: cs.transform, filter: cs.filter, contain: cs.contain, will: cs.willChange })
-            node = node.parentElement
-          }
-          console.log('[gwb-gate] own rect', JSON.stringify(own))
-          console.log('[gwb-gate] ancestors', JSON.stringify(ancestors))
-        })
-      }, [region])
+
       return h(React.Fragment, null, styleEl, h('div', {
         className: 'gwb-gate-overlay',
         role: 'dialog', 'aria-modal': false, 'aria-label': t('gateTitle'),
@@ -1180,9 +1170,6 @@ window.__ModuleLoader__.load({
             { name: 'path', description: 'The recorded workspace path.', source: 'json', codec: stringJson },
             { name: 'remark', description: 'The new remark text.', source: 'json', codec: stringJson },
           ]),
-        'githubWorkbench/clientPing': method('githubWorkbench',
-          'Diagnostic ping from the client build.',
-          [{ name: 'build', description: 'Client build marker.', source: 'json', codec: stringJson }]),
         'githubWorkbench/sessionGate': method('githubWorkbench',
           'Gate facts for one working directory: github origin and declined coverage.',
           [{ name: 'request', description: 'cwd and an optional account hint.', source: 'json', codec: requestJson }]),
@@ -1225,7 +1212,6 @@ window.__ModuleLoader__.load({
             // registered service key, not the context accessor.
             const namespace = ctx.get('remote.githubWorkbench')
             settleRemoteReady.resolve(namespace)
-            void namespace.clientPing('gate-1.1.4').catch(() => {})
           }, error => {
             // A mount rejected with "already registered" means a previous
             // generation of this page still owns the namespace: keep polling
@@ -1237,7 +1223,6 @@ window.__ModuleLoader__.load({
                   const namespace = ctx.get('remote.githubWorkbench')
                   if (namespace !== undefined) {
                     settleRemoteReady.resolve(namespace)
-                    void namespace.clientPing('gate-1.1.4').catch(() => {})
                     return
                   }
                 } catch { /* the accessor throws while the service is absent */ }
@@ -1291,7 +1276,6 @@ window.__ModuleLoader__.load({
         declinedRemove: (account, path) => call('declinedRemove', account, path),
         sessionGate: request => call('sessionGate', request),
         declinedAdd: (account, cwd) => call('declinedAdd', account, cwd),
-        clientPing: build => call('clientPing', build),
       }
 
       const openOne = async workspaceId => {
@@ -1337,7 +1321,6 @@ window.__ModuleLoader__.load({
           }
           gateSessionId = currentSession.id
           gateStore.set({ path, account: result.account ?? account, busy: false, sessionId: currentSession.id })
-          void call('clientPing', 'gate-show:' + path).catch(() => {})
         } catch (error) {
           // Gate is best-effort: a failed probe never blocks the conversation.
           gateStore.set(null)

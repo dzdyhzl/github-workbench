@@ -267,7 +267,6 @@ export class GithubWorkbenchService extends TypertRemoteService {
 
   /** Detect gh availability and enumerate signed-in accounts. */
   async status() {
-    appendGateLog({ kind: 'status.call' })
     try {
       const result = await runGh(['auth', 'status', '--json', 'hosts'], 15_000)
       if (result.exitCode !== 0) {
@@ -445,12 +444,6 @@ export class GithubWorkbenchService extends TypertRemoteService {
     const result = await runGh(['repo', 'edit', `${owner}/${name}`, '--visibility', visibility, '--accept-visibility-change-consequences'], 30_000)
     if (result.exitCode !== 0) ghFailure(`repo edit ${owner}/${name}`, result)
     return { owner, name, visibility }
-  }
-
-  /** Diagnostic: record which client build is calling (temporary). */
-  async clientPing(build) {
-    appendGateLog({ kind: 'client.ping', build: String(build ?? '') })
-    return { ok: true }
   }
 
   // ------------------------------------------------------------- declined
@@ -643,12 +636,7 @@ function run(argv) {
   })
 }
 
-// Diagnostic: prove which host build the running process loaded (temporary).
-try {
-  appendFileSync(dshHomePath('github-workbench.gate.log'), JSON.stringify({ kind: 'host.boot', build: 'host-1.1.4', at: new Date().toISOString() }) + '\n')
-} catch { /* diagnostics only */ }
 
-markRemote(GithubWorkbenchService.prototype, 'status')
 markRemote(GithubWorkbenchService.prototype, 'switchAccount')
 markRemote(GithubWorkbenchService.prototype, 'repositories')
 markRemote(GithubWorkbenchService.prototype, 'createRepository')
@@ -658,7 +646,6 @@ markRemote(GithubWorkbenchService.prototype, 'localOrigins')
 markRemote(GithubWorkbenchService.prototype, 'declinedList')
 markRemote(GithubWorkbenchService.prototype, 'declinedSetRemark')
 markRemote(GithubWorkbenchService.prototype, 'declinedRemove')
-markRemote(GithubWorkbenchService.prototype, 'clientPing')
 markRemote(GithubWorkbenchService.prototype, 'sessionGate')
 markRemote(GithubWorkbenchService.prototype, 'declinedAdd')
 

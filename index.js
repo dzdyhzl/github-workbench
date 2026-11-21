@@ -171,19 +171,12 @@ function canonicalPath(raw) {
 }
 
 /**
- * Whether one canonical declined path covers another (equal or an ancestor at
- * a path-segment boundary). Declining a parent folder silences its whole
- * subtree; the compare is case-insensitive on Windows.
+ * Whether one canonical declined path covers another. Declining a folder
+ * records exactly that path; a parent entry does not silence its child
+ * directories — each declined folder answers only for itself.
  */
 function declinedCovers(declinedKey, targetKey) {
-  if (declinedKey === targetKey) return true
-  if (process.platform === 'win32') {
-    const ancestor = declinedKey.toLowerCase()
-    const target = targetKey.toLowerCase()
-    const withSep = ancestor.endsWith('\\') ? ancestor : ancestor + '\\'
-    return target.startsWith(withSep)
-  }
-  return targetKey.startsWith(declinedKey + '/')
+  return declinedKey === targetKey
 }
 
 /** The persisted store's on-disk location (fixed by the accepted scope). */
@@ -490,9 +483,10 @@ export class GithubWorkbenchService extends TypertRemoteService {
 
   /**
    * Gate facts for one working directory: whether its git origin already
-   * points at github.com, and whether the declined list (exact match or a
-   * declined ancestor) covers it. Resolving the active account costs one gh
-   * call and is only paid when the directory is unlinked.
+   * points at github.com, and whether the declined list covers it by exact
+   * canonical path (declining a parent does not affect its children).
+   * Resolving the active account costs one gh call and is only paid when the
+   * directory is unlinked.
    */
   async sessionGate(request) {
     const cwd = String(request?.cwd ?? '').trim()

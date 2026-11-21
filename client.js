@@ -353,17 +353,18 @@ window.__ModuleLoader__.load({
 .gwb-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 70;
   background: var(--dsw-alias-toast-bg, var(--dsw-alias-label-primary)); color: var(--dsw-alias-toast-label, var(--dsw-alias-label-primary-foreground, #fff));
   border-radius: 999px; padding: 8px 18px; font-size: 12.5px; box-shadow: var(--dsw-elevation-prominent, 0 8px 24px rgba(0,0,0,0.2)); }
-.gwb-gate-overlay { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center;
-  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1, #000) 86%, transparent); backdrop-filter: blur(2px); }
+.gwb-gate-overlay { position: fixed; z-index: 40; display: flex; align-items: center; justify-content: center; }
 .gwb-gate-close { position: absolute; top: 18px; right: 22px; cursor: pointer; font: inherit; font-size: 16px; line-height: 1;
   width: 34px; height: 34px; border-radius: 999px; display: flex; align-items: center; justify-content: center;
   background: var(--dsw-alias-bg-layer-3, transparent); color: var(--dsw-alias-label-secondary);
   border: 0.5px solid var(--dsw-alias-border-l2); }
 .gwb-gate-close:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2, transparent); }
-.gwb-gate-card { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 560px; width: calc(100% - 96px);
-  box-sizing: border-box; padding: 28px 32px; border-radius: 14px; text-align: center;
-  background: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1, #fff));
-  border: 0.5px solid var(--dsw-alias-border-l1); box-shadow: var(--dsw-elevation-prominent, 0 16px 48px rgba(0,0,0,0.28)); }
+.gwb-gate-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  max-width: 560px; width: min(560px, calc(100% - 48px)); box-sizing: border-box; padding: 28px 32px; border-radius: 16px; text-align: center;
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2, #fff) 62%, transparent);
+  backdrop-filter: blur(22px) saturate(1.4); -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent);
+  box-shadow: var(--dsw-elevation-prominent, 0 16px 48px rgba(0,0,0,0.22)); }
 .gwb-gate-heading { margin: 0 0 4px; font-size: 17px; font-weight: 650; color: var(--dsw-alias-label-primary); }
 .gwb-gate-path { margin: 0 0 14px; font-size: 12.5px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
 .gwb-gate-choices { display: flex; gap: 14px; width: 100%; }
@@ -450,22 +451,42 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Fullscreen gate overlay, mounted in the frame-wide `shell.overlay` seat.
-     * Shown when the current conversation's working directory has no github.com
-     * origin and no declined-record cover; the center holds two large choice
-     * boxes and the top-right corner holds the close button.
+     * Conversation-anchored gate overlay. Anchored over the chat content area
+     * (the [data-conversation-content] container): it covers only the
+     * conversation, never the composer or the sidebars, and keeps tracking the
+     * region through window resizes. The card uses a frosted-glass surface.
      */
     function GateOverlay({ gateSource, actions, locale }) {
       const t = useMemo(() => makeT(locale), [locale])
       const [gate, setGate] = useState(gateSource.getSnapshot())
+      const [region, setRegion] = useState(null)
       useEffect(() => gateSource.subscribe(() => setGate(gateSource.getSnapshot())), [gateSource])
-      if (gate === null) return null
-      return h('div', { className: 'gwb-gate-overlay', role: 'dialog', 'aria-modal': true, 'aria-label': t('gateTitle') },
-        h('button', {
-          className: 'gwb-gate-close', title: t('gateClose'), 'aria-label': t('gateClose'),
-          onClick: () => actions.close(gate),
-        }, '\u2715'),
+      useEffect(() => {
+        if (gate === null) return
+        const measure = () => {
+          const anchor = document.querySelector('[data-conversation-content]')
+          if (anchor === null) { setRegion(null); return }
+          const box = anchor.getBoundingClientRect()
+          setRegion({ top: box.top, left: box.left, width: box.width, height: box.height })
+        }
+        measure()
+        window.addEventListener('resize', measure)
+        const observer = new ResizeObserver(measure)
+        const anchor = document.querySelector('[data-conversation-content]')
+        if (anchor !== null) observer.observe(anchor)
+        return () => { window.removeEventListener('resize', measure); observer.disconnect() }
+      }, [gate !== null])
+      if (gate === null || region === null) return null
+      return h('div', {
+        className: 'gwb-gate-overlay',
+        role: 'dialog', 'aria-modal': false, 'aria-label': t('gateTitle'),
+        style: { top: region.top, left: region.left, width: region.width, height: region.height },
+      },
         h('div', { className: 'gwb-gate-card' },
+          h('button', {
+            className: 'gwb-gate-close', title: t('gateClose'), 'aria-label': t('gateClose'),
+            onClick: () => actions.close(gate),
+          }, "✕"),
           h('h2', { className: 'gwb-gate-heading' }, t('gateTitle')),
           h('p', { className: 'gwb-gate-path' }, t('gateBody', { path: gate.path })),
           gate.error != null ? h('p', { className: 'gwb-error' }, gate.error) : null,
@@ -488,7 +509,6 @@ window.__ModuleLoader__.load({
         ),
       )
     }
-
     // --------------------------------------------------------------- visuals
 
     function PanelIcon({ size }) {
@@ -1260,12 +1280,21 @@ window.__ModuleLoader__.load({
       // re-evaluates the same directory.
       const gateDismissed = new Set()
       let gateBusy = false
+      let gateSessionId
       const evaluateGate = async () => {
         const snapshot = ctx.get('workspaces')?.list?.getSnapshot()
         const sessions = ctx.get('sessions')?.list?.getSnapshot()
         if (snapshot === undefined || sessions === undefined) return
         const currentSession = Object.values(sessions.byId).find(row => (row.retainedBy?.mainView ?? 0) > 0)
-        if (currentSession === undefined) { gateStore.set(null); return }
+        if (currentSession === undefined) { gateSessionId = undefined; gateStore.set(null); return }
+        // Switching conversations silently drops the prompt for the previous
+        // directory: no blacklist write, not dismissed — re-asking happens on
+        // the next visit to a conversation in that directory.
+        if (gateSessionId !== undefined && gateSessionId !== currentSession.id) {
+          gateSessionId = currentSession.id
+          gateStore.set(null)
+          return
+        }
         const workspace = snapshot.items.find(item => item.sessionIds.includes(currentSession.id))
         const path = workspace?.path ?? (typeof currentSession.cwd === 'string' && currentSession.cwd !== '' ? currentSession.cwd : undefined)
         if (path === undefined || gateDismissed.has(path)) { gateStore.set(null); return }
@@ -1275,10 +1304,12 @@ window.__ModuleLoader__.load({
         try {
           const result = await api.sessionGate({ cwd: path, account })
           if (result.linked === true || result.declined === true || gateDismissed.has(path)) {
+            gateSessionId = currentSession.id
             gateStore.set(null)
             return
           }
-          gateStore.set({ path, account: result.account ?? account, busy: false })
+          gateSessionId = currentSession.id
+          gateStore.set({ path, account: result.account ?? account, busy: false, sessionId: currentSession.id })
         } catch (error) {
           // Gate is best-effort: a failed probe never blocks the conversation.
           gateStore.set(null)

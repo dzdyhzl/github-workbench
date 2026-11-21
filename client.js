@@ -1220,7 +1220,12 @@ window.__ModuleLoader__.load({
             // until that namespace service is reachable, then proceed.
             if (String(error?.message ?? error).includes('already registered')) {
               remoteMounted = true
-              const waitForService = (attempt) => {
+              // A previous generation still owns the namespace. Poll for its
+              // face briefly; if the stale owner dies (page reload after a
+              // plugin update), re-attempt the mount instead of failing the
+              // whole plugin with a dead namespace.
+              let attempt = 0
+              const waitForService = () => {
                 try {
                   const namespace = ctx.get('remote.githubWorkbench')
                   if (namespace !== undefined) {
@@ -1228,14 +1233,23 @@ window.__ModuleLoader__.load({
                     return
                   }
                 } catch { /* the accessor throws while the service is absent */ }
-                if (attempt >= 50) {
-                  remoteFailure = new Error('the remote.githubWorkbench namespace never became available')
-                  settleRemoteReady.reject(remoteFailure)
+                attempt += 1
+                if (attempt > 25) {
+                  Promise.resolve()
+                    .then(() => ctx.remote.$mount(TYPERT_REMOTE))
+                    .then(dispose => {
+                      remoteMounted = true
+                      remoteDispose = dispose
+                      settleRemoteReady.resolve(ctx.get('remote.githubWorkbench'))
+                    }, retryError => {
+                      remoteFailure = retryError
+                      settleRemoteReady.reject(retryError)
+                    })
                   return
                 }
-                setTimeout(() => waitForService(attempt + 1), 100)
+                setTimeout(waitForService, 400)
               }
-              waitForService(0)
+              waitForService()
               return
             }
             remoteFailure = error

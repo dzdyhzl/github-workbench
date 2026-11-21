@@ -1294,8 +1294,23 @@ window.__ModuleLoader__.load({
       const call = async (method, ...rest) => {
         // The mount path resolves remoteReady with the namespace service face,
         // so calls never depend on the context accessor at call time.
-        const namespace = await remoteReady
-        const result = await namespace[method](...rest)
+        let namespace = await remoteReady
+        const invoke = (face, m, ...args) => face[m](...args)
+        try {
+          return await unwrap(await invoke(namespace, method, ...rest))
+        } catch (error) {
+          // A face adopted from a stale registration routes nowhere (404):
+          // re-mount under this fiber once, then retry the call.
+          if (!/404|not found/i.test(String(error?.message ?? error))) throw error
+          const remounted = await ctx.remote.$mount(TYPERT_REMOTE)
+          remoteDispose = remounted
+          namespace = ctx.get('remote.githubWorkbench')
+          if (namespace === undefined) throw error
+          return await unwrap(await invoke(namespace, method, ...rest))
+        }
+      }
+      const unwrap = async promise => {
+        const result = await promise
         if (!result.ok) {
           const failure = result.error
           const error = new Error(failure?.message ?? 'the call failed')

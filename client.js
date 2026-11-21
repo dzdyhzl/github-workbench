@@ -1291,39 +1291,29 @@ window.__ModuleLoader__.load({
       // re-evaluates the same directory.
       const gateDismissed = new Set()
       let gateBusy = false
-      let gateSessionId
-      const evaluateGate = async () => {
+      // Gate trigger: evaluate once per session, at the moment the user
+      // first acts in it (the session row's updatedAt moves past its initial
+      // value, i.e. the first message has been sent). Not linked and not
+      // declined -> raise the request overlay; anything else stays silent.
+      let gateShownSessionId
+      let gateShownDismissed = false
+      const evaluateGate = async currentSession => {
         const snapshot = ctx.get('workspaces')?.list?.getSnapshot()
-        const sessions = ctx.get('sessions')?.list?.getSnapshot()
-        if (snapshot === undefined || sessions === undefined) return
-        const currentSession = Object.values(sessions.byId).find(row => (row.retainedBy?.mainView ?? 0) > 0)
-        if (currentSession === undefined) { gateSessionId = undefined; gateStore.set(null); return }
-        // Switching conversations silently drops the prompt for the previous
-        // directory: no blacklist write, not dismissed — re-asking happens on
-        // the next visit to a conversation in that directory.
-        if (gateSessionId !== undefined && gateSessionId !== currentSession.id) {
-          gateSessionId = currentSession.id
-          gateStore.set(null)
-          return
-        }
+        if (snapshot === undefined) return
         const workspace = snapshot.items.find(item => item.sessionIds.includes(currentSession.id))
         const path = workspace?.path ?? (typeof currentSession.cwd === 'string' && currentSession.cwd !== '' ? currentSession.cwd : undefined)
-        if (path === undefined || gateDismissed.has(path)) { gateStore.set(null); return }
+        if (path === undefined || gateDismissed.has(path)) return
         const account = ctx.get('sessions')?.account ?? ''
         if (gateBusy) return
         gateBusy = true
         try {
           const result = await api.sessionGate({ cwd: path, account })
-          if (result.linked === true || result.declined === true || gateDismissed.has(path)) {
-            gateSessionId = currentSession.id
-            gateStore.set(null)
-            return
-          }
-          gateSessionId = currentSession.id
+          if (result.linked === true || result.declined === true || gateDismissed.has(path)) return
+          gateShownSessionId = currentSession.id
+          gateShownDismissed = false
           gateStore.set({ path, account: result.account ?? account, busy: false, sessionId: currentSession.id })
-        } catch (error) {
+        } catch {
           // Gate is best-effort: a failed probe never blocks the conversation.
-          gateStore.set(null)
         } finally {
           gateBusy = false
         }
@@ -1347,11 +1337,42 @@ window.__ModuleLoader__.load({
           }
         },
       }
+      // The list subscription is the activity sensor: the current main-view
+      // session's first message moves its updatedAt; from then on the gate is
+      // evaluated exactly once for that session. Switching conversations
+      // silently drops a visible prompt (no blacklist write, not dismissed).
       ctx.effect(() => {
-        const unsubscribeSessions = ctx.get('sessions')?.list?.subscribe(() => { void evaluateGate() })
-        const unsubscribeWorkspaces = ctx.get('workspaces')?.list?.subscribe(() => { void evaluateGate() })
-        void evaluateGate()
-        return () => { unsubscribeSessions?.(); unsubscribeWorkspaces?.() }
+        // Baseline per current session; the first message moves updatedAt.
+        let currentId
+        let baselineUpdatedAt = Number.NEGATIVE_INFINITY
+        let baselineRunning = false
+        let evaluated = false
+        const unsubscribe = ctx.get('sessions')?.list?.subscribe(() => {
+          const sessions = ctx.get('sessions')?.list?.getSnapshot()
+          if (sessions === undefined) return
+          const currentSession = Object.values(sessions.byId).find(row => (row.retainedBy?.mainView ?? 0) > 0)
+          if (currentSession === undefined) { currentId = undefined; return }
+          if (currentId !== currentSession.id) {
+            // Conversation switch: drop a visible prompt silently (no blacklist
+            // write, not dismissed) and re-baseline for the new session.
+            if (gateShownSessionId !== undefined && gateShownSessionId !== currentSession.id) {
+              gateShownSessionId = undefined
+              gateShownDismissed = false
+              gateStore.set(null)
+            }
+            currentId = currentSession.id
+            baselineUpdatedAt = currentSession.updatedAt
+            baselineRunning = currentSession.running === true
+            evaluated = false
+          }
+          if (evaluated) return
+          const firstMessage = currentSession.updatedAt > baselineUpdatedAt
+            || (currentSession.running === true && !baselineRunning)
+          if (!firstMessage) return
+          evaluated = true
+          void evaluateGate(currentSession)
+        })
+        return () => { unsubscribe?.() }
       }, 'github-workbench: gate evaluation')
       ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({
         name: 'shell.overlay', id: 'github-workbench.gate', locale: NS,

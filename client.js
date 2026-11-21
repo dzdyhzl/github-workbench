@@ -718,10 +718,12 @@ window.__ModuleLoader__.load({
       const [gateCreate, setGateCreate] = useState(null)
       useEffect(() => {
         if (createRequestSource === undefined) return
-        return createRequestSource.subscribe(() => {
+        const consume = () => {
           const next = createRequestSource.getSnapshot()
           if (next !== null) { setGateCreate(next); createRequestSource.dismiss() }
-        })
+        }
+        consume()
+        return createRequestSource.subscribe(consume)
       }, [createRequestSource])
       useEffect(() => {
         if (gateCreate !== null) setCreateTarget(gateCreate)
@@ -1321,7 +1323,8 @@ window.__ModuleLoader__.load({
       const gateActions = {
         close: gate => { gateDismissed.add(gate.path); gateStore.set(null) },
         create: gate => {
-          gateDismissed.add(gate.path)
+          // Not treated as handled: until a repository actually exists and is
+          // linked, the next conversation in this directory asks again.
           gateStore.set(null)
           createRequestStore.set({ cwd: gate.path, name: gate.path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '' })
           try { ctx.layout.selectPanel('github-repo-workbench') } catch { /* panel selection is best-effort */ }

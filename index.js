@@ -643,6 +643,11 @@ function run(argv) {
   })
 }
 
+// Diagnostic: prove which host build the running process loaded (temporary).
+try {
+  appendFileSync(dshHomePath('github-workbench.gate.log'), JSON.stringify({ kind: 'host.boot', build: 'host-1.1.4', at: new Date().toISOString() }) + '\n')
+} catch { /* diagnostics only */ }
+
 markRemote(GithubWorkbenchService.prototype, 'status')
 markRemote(GithubWorkbenchService.prototype, 'switchAccount')
 markRemote(GithubWorkbenchService.prototype, 'repositories')

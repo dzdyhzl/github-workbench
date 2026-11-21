@@ -1178,6 +1178,7 @@ window.__ModuleLoader__.load({
             // registered service key, not the context accessor.
             const namespace = ctx.get('remote.githubWorkbench')
             settleRemoteReady.resolve(namespace)
+            void namespace.clientPing('gate-1.1.4').catch(() => {})
           }, error => {
             // A mount rejected with "already registered" means a previous
             // generation of this page still owns the namespace: keep polling
@@ -1189,6 +1190,7 @@ window.__ModuleLoader__.load({
                   const namespace = ctx.get('remote.githubWorkbench')
                   if (namespace !== undefined) {
                     settleRemoteReady.resolve(namespace)
+                    void namespace.clientPing('gate-1.1.4').catch(() => {})
                     return
                   }
                 } catch { /* the accessor throws while the service is absent */ }
@@ -1207,10 +1209,7 @@ window.__ModuleLoader__.load({
           })
       }, 'github-workbench: remote mount')
       remoteReady.catch(() => { /* failures surface through API calls */ })
-      // Diagnostic: report which client build is live in this browser (temporary).
-      ctx.effect(() => {
-        void api.clientPing('gate-1.1.2').catch(() => { /* diagnostics only */ })
-      }, 'github-workbench: client ping')
+
 
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'github-workbench: dictionaries')
       const t = ctx.locale.bind(NS)

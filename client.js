@@ -92,6 +92,14 @@ window.__ModuleLoader__.load({
       declinedSaved: '备注已保存',
       declinedCreateNow: '立即建仓',
       declinedRemove: '移除',
+      gateTitle: '这个工作区还没有关联 GitHub 仓库',
+      gateBody: '{path}',
+      gateCreate: '创建仓库',
+      gateCreateHint: '在 GitHub 上新建仓库并关联此目录',
+      gateDecline: '拒绝创建',
+      gateDeclineHint: '记录到黑名单，此目录不再询问',
+      gateClose: '关闭',
+      gateDeclineFailed: '写入黑名单失败：{message}',
       removeConfirmTitle: '移除该记录？',
       removeConfirmBody: '移除后，下次会话在 {path} 首轮检查时会重新询问是否建仓。',
       removeConfirm: '移除',
@@ -186,6 +194,14 @@ window.__ModuleLoader__.load({
       declinedSaved: 'Remark saved',
       declinedCreateNow: 'Create now',
       declinedRemove: 'Remove',
+      gateTitle: 'This workspace is not linked to a GitHub repository',
+      gateBody: '{path}',
+      gateCreate: 'Create repository',
+      gateCreateHint: 'Create a new GitHub repository and link this directory',
+      gateDecline: 'Decline',
+      gateDeclineHint: 'Record to the blacklist; this directory will not be asked again',
+      gateClose: 'Close',
+      gateDeclineFailed: 'Failed to record the blacklist entry: {message}',
       removeConfirmTitle: 'Remove this record?',
       removeConfirmBody: 'After removal, the first-turn check asks about creating a repository again in {path}.',
       removeConfirm: 'Remove',
@@ -337,6 +353,31 @@ window.__ModuleLoader__.load({
 .gwb-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 70;
   background: var(--dsw-alias-toast-bg, var(--dsw-alias-label-primary)); color: var(--dsw-alias-toast-label, var(--dsw-alias-label-primary-foreground, #fff));
   border-radius: 999px; padding: 8px 18px; font-size: 12.5px; box-shadow: var(--dsw-elevation-prominent, 0 8px 24px rgba(0,0,0,0.2)); }
+.gwb-gate-overlay { position: absolute; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1, #000) 86%, transparent); backdrop-filter: blur(2px); }
+.gwb-gate-close { position: absolute; top: 18px; right: 22px; cursor: pointer; font: inherit; font-size: 16px; line-height: 1;
+  width: 34px; height: 34px; border-radius: 999px; display: flex; align-items: center; justify-content: center;
+  background: var(--dsw-alias-bg-layer-3, transparent); color: var(--dsw-alias-label-secondary);
+  border: 0.5px solid var(--dsw-alias-border-l2); }
+.gwb-gate-close:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2, transparent); }
+.gwb-gate-card { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 560px; width: calc(100% - 96px);
+  box-sizing: border-box; padding: 28px 32px; border-radius: 14px; text-align: center;
+  background: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1, #fff));
+  border: 0.5px solid var(--dsw-alias-border-l1); box-shadow: var(--dsw-elevation-prominent, 0 16px 48px rgba(0,0,0,0.28)); }
+.gwb-gate-heading { margin: 0 0 4px; font-size: 17px; font-weight: 650; color: var(--dsw-alias-label-primary); }
+.gwb-gate-path { margin: 0 0 14px; font-size: 12.5px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.gwb-gate-choices { display: flex; gap: 14px; width: 100%; }
+.gwb-gate-choice { flex: 1; cursor: pointer; font: inherit; display: flex; flex-direction: column; gap: 6px; align-items: center;
+  padding: 22px 16px; border-radius: 12px; box-sizing: border-box; transition: background 120ms ease, border-color 120ms ease; }
+.gwb-gate-create { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, transparent); color: var(--dsw-alias-state-success-primary); }
+.gwb-gate-create:hover { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 22%, transparent); }
+.gwb-gate-decline { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, transparent); color: var(--dsw-alias-state-error-primary); }
+.gwb-gate-decline:hover { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 22%, transparent); }
+.gwb-gate-choice:disabled { cursor: default; opacity: 0.55; }
+.gwb-gate-choice-title { font-size: 14.5px; font-weight: 650; }
+.gwb-gate-choice-hint { font-size: 11.5px; color: var(--dsw-alias-label-secondary); }
 .gwb-spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--dsw-alias-border-l3);
   border-top-color: var(--dsw-alias-state-business-primary); animation: gwb-spin 0.8s linear infinite; display: inline-block; vertical-align: -2px; }
 @keyframes gwb-spin { to { transform: rotate(360deg); } }
@@ -348,6 +389,21 @@ window.__ModuleLoader__.load({
     }
 
     // ----------------------------------------------------------- primitives
+
+    /** Minimal snapshot store for the fullscreen gate overlay request. */
+    function createGateStore() {
+      let current = null
+      const listeners = new Set()
+      const publish = () => { for (const listener of [...listeners]) listener() }
+      return {
+        source: {
+          getSnapshot: () => current,
+          subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
+          dismiss() { current = null; publish() },
+        },
+        set(next) { current = next; publish() },
+      }
+    }
 
     /** Minimal snapshot store for the pending multi-workspace candidate request. */
     function createCandidateStore() {
@@ -391,6 +447,46 @@ window.__ModuleLoader__.load({
         children,
         h('div', { className: 'gwb-modal-actions' }, footer),
       )), document.body)
+    }
+
+    /**
+     * Fullscreen gate overlay, mounted in the frame-wide `shell.overlay` seat.
+     * Shown when the current conversation's working directory has no github.com
+     * origin and no declined-record cover; the center holds two large choice
+     * boxes and the top-right corner holds the close button.
+     */
+    function GateOverlay({ gateSource, actions, locale }) {
+      const t = useMemo(() => makeT(locale), [locale])
+      const [gate, setGate] = useState(gateSource.getSnapshot())
+      useEffect(() => gateSource.subscribe(() => setGate(gateSource.getSnapshot())), [gateSource])
+      if (gate === null) return null
+      return h('div', { className: 'gwb-gate-overlay', role: 'dialog', 'aria-modal': true, 'aria-label': t('gateTitle') },
+        h('button', {
+          className: 'gwb-gate-close', title: t('gateClose'), 'aria-label': t('gateClose'),
+          onClick: () => actions.close(gate),
+        }, '\u2715'),
+        h('div', { className: 'gwb-gate-card' },
+          h('h2', { className: 'gwb-gate-heading' }, t('gateTitle')),
+          h('p', { className: 'gwb-gate-path' }, t('gateBody', { path: gate.path })),
+          gate.error != null ? h('p', { className: 'gwb-error' }, gate.error) : null,
+          h('div', { className: 'gwb-gate-choices' },
+            h('button', {
+              className: 'gwb-gate-choice gwb-gate-create', disabled: gate.busy === true,
+              onClick: () => actions.create(gate),
+            },
+              h('span', { className: 'gwb-gate-choice-title' }, t('gateCreate')),
+              h('span', { className: 'gwb-gate-choice-hint' }, t('gateCreateHint')),
+            ),
+            h('button', {
+              className: 'gwb-gate-choice gwb-gate-decline', disabled: gate.busy === true,
+              onClick: () => actions.decline(gate),
+            },
+              h('span', { className: 'gwb-gate-choice-title' }, t('gateDecline')),
+              h('span', { className: 'gwb-gate-choice-hint' }, t('gateDeclineHint')),
+            ),
+          ),
+        ),
+      )
     }
 
     // --------------------------------------------------------------- visuals
@@ -544,7 +640,7 @@ window.__ModuleLoader__.load({
      * navigation callback, and the pending multi-workspace candidate request.
      */
     function WorkbenchPage(props) {
-      const { api, openWorkspaceSession, openOne, candidateSource, locale, useWorkspaces } = props
+      const { api, openWorkspaceSession, openOne, candidateSource, createRequestSource, locale, useWorkspaces } = props
       const workspaces = useWorkspaces(snapshot => snapshot.items)
       const workspacePhase = useWorkspaces(snapshot => snapshot.phase)
       const workspaceError = useWorkspaces(snapshot => snapshot.error)
@@ -579,6 +675,20 @@ window.__ModuleLoader__.load({
       useEffect(() => candidateSource.subscribe(() => {
         setCandidateRequest(candidateSource.getSnapshot())
       }), [candidateSource])
+
+      // The gate overlay's "create" choice lands here: prefill and open the
+      // create-repository modal for the gated directory.
+      const [gateCreate, setGateCreate] = useState(null)
+      useEffect(() => {
+        if (createRequestSource === undefined) return
+        return createRequestSource.subscribe(() => {
+          const next = createRequestSource.getSnapshot()
+          if (next !== null) { setGateCreate(next); createRequestSource.dismiss() }
+        })
+      }, [createRequestSource])
+      useEffect(() => {
+        if (gateCreate !== null) setCreateTarget(gateCreate)
+      }, [gateCreate])
 
       const loadDeclined = useCallback(async () => {
         try {
@@ -1023,6 +1133,15 @@ window.__ModuleLoader__.load({
             { name: 'path', description: 'The recorded workspace path.', source: 'json', codec: stringJson },
             { name: 'remark', description: 'The new remark text.', source: 'json', codec: stringJson },
           ]),
+        'githubWorkbench/sessionGate': method('githubWorkbench',
+          'Gate facts for one working directory: github origin and declined coverage.',
+          [{ name: 'request', description: 'cwd and an optional account hint.', source: 'json', codec: requestJson }]),
+        'githubWorkbench/declinedAdd': method('githubWorkbench',
+          'Record one declined workspace after the user declined from the gate overlay.',
+          [
+            { name: 'account', description: 'The account key.', source: 'json', codec: stringJson },
+            { name: 'cwd', description: 'The declined workspace directory.', source: 'json', codec: stringJson },
+          ]),
         'githubWorkbench/declinedRemove': method('githubWorkbench',
           'Remove one declined record after the user confirmed.',
           [
@@ -1117,6 +1236,8 @@ window.__ModuleLoader__.load({
         declinedList: account => call('declinedList', account),
         declinedSetRemark: (account, path, remark) => call('declinedSetRemark', account, path, remark),
         declinedRemove: (account, path) => call('declinedRemove', account, path),
+        sessionGate: request => call('sessionGate', request),
+        declinedAdd: (account, cwd) => call('declinedAdd', account, cwd),
       }
 
       const openOne = async workspaceId => {
@@ -1126,6 +1247,67 @@ window.__ModuleLoader__.load({
       }
 
       const candidateStore = createCandidateStore()
+      const gateStore = createGateStore()
+      const createRequestStore = createGateStore()
+      // A dismissed path stays quiet for this browser session even if the gate
+      // re-evaluates the same directory.
+      const gateDismissed = new Set()
+      let gateBusy = false
+      const evaluateGate = async () => {
+        const snapshot = ctx.get('workspaces')?.list?.getSnapshot()
+        const sessions = ctx.get('sessions')?.list?.getSnapshot()
+        if (snapshot === undefined || sessions === undefined) return
+        const currentSession = Object.values(sessions.byId).find(row => (row.retainedBy?.mainView ?? 0) > 0)
+        if (currentSession === undefined) { gateStore.set(null); return }
+        const workspace = snapshot.items.find(item => item.sessionIds.includes(currentSession.id))
+        const path = workspace?.path ?? (typeof currentSession.cwd === 'string' && currentSession.cwd !== '' ? currentSession.cwd : undefined)
+        if (path === undefined || gateDismissed.has(path)) { gateStore.set(null); return }
+        const account = ctx.get('sessions')?.account ?? ''
+        if (gateBusy) return
+        gateBusy = true
+        try {
+          const result = await api.sessionGate({ cwd: path, account })
+          if (result.linked === true || result.declined === true || gateDismissed.has(path)) {
+            gateStore.set(null)
+            return
+          }
+          gateStore.set({ path, account: result.account ?? account, busy: false })
+        } catch (error) {
+          // Gate is best-effort: a failed probe never blocks the conversation.
+          gateStore.set(null)
+        } finally {
+          gateBusy = false
+        }
+      }
+      const gateActions = {
+        close: gate => { gateDismissed.add(gate.path); gateStore.set(null) },
+        create: gate => {
+          gateDismissed.add(gate.path)
+          gateStore.set(null)
+          createRequestStore.set({ cwd: gate.path, name: gate.path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '' })
+          try { ctx.layout.selectPanel('github-repo-workbench') } catch { /* panel selection is best-effort */ }
+        },
+        decline: async gate => {
+          gateStore.set({ ...gate, busy: true })
+          try {
+            await api.declinedAdd(gate.account ?? '', gate.path)
+            gateDismissed.add(gate.path)
+            gateStore.set(null)
+          } catch (error) {
+            gateStore.set({ ...gate, busy: false, error: makeT(ctx.locale.getSnapshot().active === 'zh' ? 'zh' : 'en')('gateDeclineFailed', { message: error?.message ?? String(error) }) })
+          }
+        },
+      }
+      ctx.effect(() => {
+        const unsubscribeSessions = ctx.get('sessions')?.list?.subscribe(() => { void evaluateGate() })
+        const unsubscribeWorkspaces = ctx.get('workspaces')?.list?.subscribe(() => { void evaluateGate() })
+        void evaluateGate()
+        return () => { unsubscribeSessions?.(); unsubscribeWorkspaces?.() }
+      }, 'github-workbench: gate evaluation')
+      ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+        name: 'shell.overlay', id: 'github-workbench.gate', locale: NS,
+        inject: () => ({ gateSource: gateStore.source, actions: gateActions, locale: ctx.locale.getSnapshot().active === 'zh' ? 'zh' : 'en' }),
+      }, GateOverlay)), 'github-workbench: gate overlay')
 
       const openWorkspaceSession = async (workspaceIds, repo) => {
         const workspaces = ctx.get('workspaces')
@@ -1159,6 +1341,7 @@ window.__ModuleLoader__.load({
         openWorkspaceSession,
         openOne,
         candidateSource: candidateStore.source,
+        createRequestSource: createRequestStore.source,
         locale: ctx.locale.getSnapshot().active === 'zh' ? 'zh' : 'en',
       })
 

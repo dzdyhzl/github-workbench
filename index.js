@@ -170,6 +170,22 @@ function canonicalPath(raw) {
     : value.replace(/\/+$/, '')
 }
 
+/**
+ * Whether one canonical declined path covers another (equal or an ancestor at
+ * a path-segment boundary). Declining a parent folder silences its whole
+ * subtree; the compare is case-insensitive on Windows.
+ */
+function declinedCovers(declinedKey, targetKey) {
+  if (declinedKey === targetKey) return true
+  if (process.platform === 'win32') {
+    const ancestor = declinedKey.toLowerCase()
+    const target = targetKey.toLowerCase()
+    const withSep = ancestor.endsWith('\\') ? ancestor : ancestor + '\\'
+    return target.startsWith(withSep)
+  }
+  return targetKey.startsWith(declinedKey + '/')
+}
+
 /** The persisted store's on-disk location (fixed by the accepted scope). */
 function storePath() {
   return dshHomePath('github-workbench.json')
@@ -464,6 +480,51 @@ export class GithubWorkbenchService extends TypertRemoteService {
     })
   }
 
+  /**
+   * Gate facts for one working directory: whether its git origin already
+   * points at github.com, and whether the declined list (exact match or a
+   * declined ancestor) covers it. Resolving the active account costs one gh
+   * call and is only paid when the directory is unlinked.
+   */
+  async sessionGate(request) {
+    const cwd = String(request?.cwd ?? '').trim()
+    if (!isAbsolute(cwd) || !existsSync(cwd)) {
+      throw new RemoteError('github-workbench/invalid-workspace', `the workspace directory does not exist: ${cwd} `, { path: cwd })
+    }
+    const origin = await originOfWorkspace(cwd)
+    if (origin !== null) return { linked: true, declined: false, origin }
+    let account = normalizeAccountKey(request?.account)
+    if (account === '') {
+      const whoami = await ghJson(['api', 'user', '--jq', '.login'])
+      account = normalizeAccountKey(whoami)
+    }
+    const store = readStore()
+    if (store.malformed) return { linked: false, declined: false, account }
+    const target = canonicalPath(cwd)
+    const covered = listDeclined(store, account).some(row =>
+      typeof row.path === 'string' && row.path !== '' && declinedCovers(canonicalPath(row.path), target))
+    return { linked: false, declined: covered, account }
+  }
+
+  /** Record one declined workspace (exact path, deduplicated, locked write). */
+  async declinedAdd(account, cwd) {
+    const key = normalizeAccountKey(account)
+    const raw = String(cwd ?? '').trim()
+    if (!isAbsolute(raw) || !existsSync(raw)) {
+      throw new RemoteError('github-workbench/invalid-workspace', `the workspace directory does not exist: ${raw} `, { path: raw })
+    }
+    const target = canonicalPath(raw)
+    await this.mutateStore(store => {
+      const rows = listDeclined(store, key)
+      if (rows.some(row => typeof row.path === 'string' && canonicalPath(row.path) === target)) {
+        return store
+      }
+      const next = { path: raw, declinedAt: new Date().toISOString(), remark: '' }
+      return { ...store, declined: { ...store.declined, [key]: [...rows, next] } }
+    })
+    return { account: key, path: raw, added: true }
+  }
+
   /** Serialized read-modify-write on the shared JSON file. */
   async mutateStore(change) {
     const file = storePath()
@@ -572,5 +633,7 @@ markRemote(GithubWorkbenchService.prototype, 'localOrigins')
 markRemote(GithubWorkbenchService.prototype, 'declinedList')
 markRemote(GithubWorkbenchService.prototype, 'declinedSetRemark')
 markRemote(GithubWorkbenchService.prototype, 'declinedRemove')
+markRemote(GithubWorkbenchService.prototype, 'sessionGate')
+markRemote(GithubWorkbenchService.prototype, 'declinedAdd')
 
 export default GithubWorkbenchService

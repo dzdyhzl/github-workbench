@@ -345,8 +345,9 @@ export class GithubWorkbenchService extends TypertRemoteService {
     if (name === '' || /[^\w.-]/.test(name)) {
       throw new RemoteError('github-workbench/invalid-repository', 'the repository name must be a plain GitHub repository name', { name })
     }
-    const whoami = await ghJson(['api', 'user', '--jq', '.login'])
-    const owner = typeof whoami === 'string' ? whoami.trim() : ''
+    const whoami = await runGh(['api', 'user', '--jq', '.login'], 20_000)
+    if (whoami.exitCode !== 0) ghFailure('api user', whoami)
+    const owner = whoami.stdout.trim()
     if (owner === '') throw new RemoteError('github-workbench/gh-failed', 'gh api user returned no login', { action: 'api user' })
     const exists = await this.repositoryExists(owner, name)
     if (exists.exists) {
@@ -489,14 +490,16 @@ export class GithubWorkbenchService extends TypertRemoteService {
   async sessionGate(request) {
     const cwd = String(request?.cwd ?? '').trim()
     if (!isAbsolute(cwd) || !existsSync(cwd)) {
-      throw new RemoteError('github-workbench/invalid-workspace', `the workspace directory does not exist: ${cwd} `, { path: cwd })
+      throw new RemoteError('github-workbench/invalid-workspace', `the workspace directory does not exist: ${cwd}`, { path: cwd })
     }
     const origin = await originOfWorkspace(cwd)
     if (origin !== null) return { linked: true, declined: false, origin }
     let account = normalizeAccountKey(request?.account)
     if (account === '') {
-      const whoami = await ghJson(['api', 'user', '--jq', '.login'])
-      account = normalizeAccountKey(whoami)
+      // --jq emits the bare login string, not JSON; read stdout directly.
+      const whoami = await runGh(['api', 'user', '--jq', '.login'], 20_000)
+      if (whoami.exitCode !== 0) ghFailure('api user', whoami)
+      account = normalizeAccountKey(whoami.stdout)
     }
     const store = readStore()
     if (store.malformed) return { linked: false, declined: false, account }
@@ -511,7 +514,7 @@ export class GithubWorkbenchService extends TypertRemoteService {
     const key = normalizeAccountKey(account)
     const raw = String(cwd ?? '').trim()
     if (!isAbsolute(raw) || !existsSync(raw)) {
-      throw new RemoteError('github-workbench/invalid-workspace', `the workspace directory does not exist: ${raw} `, { path: raw })
+      throw new RemoteError('github-workbench/invalid-workspace', `the workspace directory does not exist: ${raw}`, { path: raw })
     }
     const target = canonicalPath(raw)
     await this.mutateStore(store => {

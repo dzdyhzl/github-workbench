@@ -354,31 +354,42 @@ export class GithubWorkbenchService extends TypertRemoteService {
     if (exists.exists) {
       throw new RemoteError('github-workbench/repository-exists', `repository ${owner}/${name} already exists; rename the new repository or link the existing one as origin`, { owner, name })
     }
+    // gh repo create --source requires an existing git repository; initialize
+    // the directory first when it is not one (matches the workbench prompt
+    // template's flow: init with main before creating and pushing).
+    let initializedHere = false
+    if (link === true && !existsSync(join(cwd, '.git'))) {
+      const initResult = await run(['git', '-C', cwd, 'init', '-b', 'main'])
+      if (initResult === null) {
+        throw new RemoteError('github-workbench/git-failed', `git init failed for ${cwd}; install git or initialize the directory manually`, { path: cwd })
+      }
+      initializedHere = true
+      appendGateLog({ kind: 'create.git-init', cwd })
+    }
     const args = ['repo', 'create', name, '--disable-wiki', visibility === 'public' ? '--public' : '--private']
     if (description !== '') args.push('--description', description)
     if (link) args.push('--source', cwd, '--remote', 'origin')
-    let created
-    try {
-      created = await ghJson(args)
-    } catch (error) {
-      appendGateLog({ kind: 'create.fail', name, message: error?.message ?? String(error) })
-      throw error
+    // gh repo create prints the new repository URL (plain text), not JSON.
+    const created = await runGh(args)
+    if (created.exitCode !== 0) {
+      appendGateLog({ kind: 'create.fail', name, message: firstLine(created.stderr) || `exit ${created.exitCode}` })
+      ghFailure(args.join(' '), created)
     }
-    appendGateLog({ kind: 'create.ok', name, url: typeof created?.html_url === 'string' ? created.html_url : '' })
-    const url = typeof created?.html_url === 'string' && created.html_url !== ''
-      ? created.html_url
-      : `${PAGE_BASE}/${owner}/${name}`
+    const printedUrl = (created.stdout.split('\n').find(line => /^https:\/\//.test(line.trim())) ?? '').trim()
+    appendGateLog({ kind: 'create.ok', name, url: printedUrl })
+    const url = printedUrl !== '' ? printedUrl : `${PAGE_BASE}/${owner}/${name}`
     return {
       owner,
       name,
       url,
       linked: link,
-      followUp: link
-        ? ['git push -u origin main  # after your first commit']
-        : [
-            `git remote add origin ${url}.git`,
-            'git push -u origin main  # after your first commit',
-          ],
+      followUp: [
+        ...(initializedHere ? [`git -C "${cwd}" init -b main  # done automatically`] : []),
+        ...(link
+          ? []
+          : [`git remote add origin ${url}.git`]),
+        'git push -u origin main  # after your first commit',
+      ],
     }
   }
 

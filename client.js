@@ -677,7 +677,7 @@ window.__ModuleLoader__.load({
      * navigation callback, and the pending multi-workspace candidate request.
      */
     function WorkbenchPage(props) {
-      const { api, openWorkspaceSession, openOne, candidateSource, createRequestSource, locale, useWorkspaces } = props
+      const { api, openWorkspaceSession, openOne, candidateSource, createRequestSource, mountFailure, locale, useWorkspaces } = props
       const workspaces = useWorkspaces(snapshot => snapshot.items)
       const workspacePhase = useWorkspaces(snapshot => snapshot.phase)
       const workspaceError = useWorkspaces(snapshot => snapshot.error)
@@ -901,7 +901,7 @@ window.__ModuleLoader__.load({
       if (status.phase === 'error') {
         return h('section', { className: 'gwb-page', 'data-github-workbench-page': true }, h(Styles), h('div', { className: 'gwb-gate' },
           h('h2', null, t('statusFailed')),
-          h('p', { className: 'gwb-error' }, status.message),
+          h('p', { className: 'gwb-error' }, status.message + (typeof mountFailure === 'function' && mountFailure() ? ' — mount: ' + (mountFailure()?.message ?? String(mountFailure())) : '')),
           h('button', { className: 'gwb-btn gwb-btn-primary', onClick: recheck }, t('recheck')),
         ))
       }
@@ -1252,8 +1252,34 @@ window.__ModuleLoader__.load({
               waitForService()
               return
             }
-            remoteFailure = error
-            settleRemoteReady.reject(error)
+            // Any other mount failure: retry with backoff instead of leaving
+            // the plugin with a permanently dead namespace.
+            let retries = 0
+            const retryMount = () => {
+              retries += 1
+              if (retries > 10) {
+                remoteFailure = error
+                settleRemoteReady.reject(error)
+                return
+              }
+              setTimeout(() => {
+                Promise.resolve()
+                  .then(() => ctx.remote.$mount(TYPERT_REMOTE))
+                  .then(dispose => {
+                    remoteMounted = true
+                    remoteDispose = dispose
+                    settleRemoteReady.resolve(ctx.get('remote.githubWorkbench'))
+                  }, retryError => {
+                    if (String(retryError?.message ?? retryError).includes('already registered')) {
+                      retryMount()
+                      return
+                    }
+                    remoteFailure = retryError
+                    settleRemoteReady.reject(retryError)
+                  })
+              }, Math.min(500 * retries, 4000))
+            }
+            retryMount()
           })
       }, 'github-workbench: remote mount')
       remoteReady.catch(() => { /* failures surface through API calls */ })
@@ -1279,6 +1305,8 @@ window.__ModuleLoader__.load({
         }
         return result.value
       }
+      /** The mount failure, if the namespace never became reachable. */
+      const mountFailure = () => remoteFailure
       const api = {
         status: () => call('status'),
         switchAccount: login => call('switchAccount', login),
@@ -1430,6 +1458,7 @@ window.__ModuleLoader__.load({
 
       const injected = () => ({
         api,
+        mountFailure,
         openWorkspaceSession,
         openOne,
         candidateSource: candidateStore.source,

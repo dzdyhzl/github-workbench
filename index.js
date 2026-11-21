@@ -334,6 +334,7 @@ export class GithubWorkbenchService extends TypertRemoteService {
    * stages, commits, or pushes on its own.
    */
   async createRepository(request) {
+    appendGateLog({ kind: 'create.call', request: { cwd: String(request?.cwd ?? ''), name: String(request?.name ?? ''), visibility: String(request?.visibility ?? '') } })
     const cwd = String(request?.cwd ?? '').trim()
     const name = String(request?.name ?? '').trim()
     const description = typeof request?.description === 'string' ? request.description.trim() : ''
@@ -356,7 +357,14 @@ export class GithubWorkbenchService extends TypertRemoteService {
     const args = ['repo', 'create', name, '--disable-wiki', visibility === 'public' ? '--public' : '--private']
     if (description !== '') args.push('--description', description)
     if (link) args.push('--source', cwd, '--remote', 'origin')
-    const created = await ghJson(args)
+    let created
+    try {
+      created = await ghJson(args)
+    } catch (error) {
+      appendGateLog({ kind: 'create.fail', name, message: error?.message ?? String(error) })
+      throw error
+    }
+    appendGateLog({ kind: 'create.ok', name, url: typeof created?.html_url === 'string' ? created.html_url : '' })
     const url = typeof created?.html_url === 'string' && created.html_url !== ''
       ? created.html_url
       : `${PAGE_BASE}/${owner}/${name}`

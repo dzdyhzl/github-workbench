@@ -465,8 +465,12 @@ window.__ModuleLoader__.load({
         if (gate === null) return
         const measure = () => {
           const anchor = document.querySelector('[data-conversation-content]')
-          if (anchor === null) { setRegion(null); return }
+          if (anchor === null) {
+            void fetch(location.origin + '/plugins/' + encodeURIComponent('debug-gate') + '/probe?where=conversation-content-missing').catch(() => {})
+            setRegion(null); return
+          }
           const box = anchor.getBoundingClientRect()
+          console.log('[gwb-gate] region', JSON.stringify({ top: box.top, left: box.left, width: box.width, height: box.height }))
           setRegion({ top: box.top, left: box.left, width: box.width, height: box.height })
         }
         measure()
@@ -477,6 +481,22 @@ window.__ModuleLoader__.load({
         return () => { window.removeEventListener('resize', measure); observer.disconnect() }
       }, [gate !== null])
       if (gate === null || region === null) return null
+      useEffect(() => {
+        requestAnimationFrame(() => {
+          const el = document.querySelector('.gwb-gate-overlay')
+          if (el === null) return
+          const own = el.getBoundingClientRect()
+          const ancestors = []
+          let node = el.parentElement
+          while (node !== null && ancestors.length < 12) {
+            const cs = getComputedStyle(node)
+            ancestors.push({ tag: node.tagName, cls: String(node.className).slice(0, 60), pos: cs.position, transform: cs.transform, filter: cs.filter, contain: cs.contain, will: cs.willChange })
+            node = node.parentElement
+          }
+          console.log('[gwb-gate] own rect', JSON.stringify(own))
+          console.log('[gwb-gate] ancestors', JSON.stringify(ancestors))
+        })
+      }, [region])
       return h('div', {
         className: 'gwb-gate-overlay',
         role: 'dialog', 'aria-modal': false, 'aria-label': t('gateTitle'),
@@ -1310,6 +1330,7 @@ window.__ModuleLoader__.load({
           }
           gateSessionId = currentSession.id
           gateStore.set({ path, account: result.account ?? account, busy: false, sessionId: currentSession.id })
+          void call('clientPing', 'gate-show:' + path).catch(() => {})
         } catch (error) {
           // Gate is best-effort: a failed probe never blocks the conversation.
           gateStore.set(null)

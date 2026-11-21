@@ -353,32 +353,6 @@ window.__ModuleLoader__.load({
 .gwb-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 70;
   background: var(--dsw-alias-toast-bg, var(--dsw-alias-label-primary)); color: var(--dsw-alias-toast-label, var(--dsw-alias-label-primary-foreground, #fff));
   border-radius: 999px; padding: 8px 18px; font-size: 12.5px; box-shadow: var(--dsw-elevation-prominent, 0 8px 24px rgba(0,0,0,0.2)); }
-.gwb-gate-overlay { position: fixed; z-index: 40; display: flex; align-items: center; justify-content: center; }
-.gwb-gate-close { position: absolute; top: 18px; right: 22px; cursor: pointer; font: inherit; font-size: 16px; line-height: 1;
-  width: 34px; height: 34px; border-radius: 999px; display: flex; align-items: center; justify-content: center;
-  background: var(--dsw-alias-bg-layer-3, transparent); color: var(--dsw-alias-label-secondary);
-  border: 0.5px solid var(--dsw-alias-border-l2); }
-.gwb-gate-close:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2, transparent); }
-.gwb-gate-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px;
-  max-width: 560px; width: min(560px, calc(100% - 48px)); box-sizing: border-box; padding: 28px 32px; border-radius: 16px; text-align: center;
-  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2, #fff) 62%, transparent);
-  backdrop-filter: blur(22px) saturate(1.4); -webkit-backdrop-filter: blur(22px) saturate(1.4);
-  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent);
-  box-shadow: var(--dsw-elevation-prominent, 0 16px 48px rgba(0,0,0,0.22)); }
-.gwb-gate-heading { margin: 0 0 4px; font-size: 17px; font-weight: 650; color: var(--dsw-alias-label-primary); }
-.gwb-gate-path { margin: 0 0 14px; font-size: 12.5px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
-.gwb-gate-choices { display: flex; gap: 14px; width: 100%; }
-.gwb-gate-choice { flex: 1; cursor: pointer; font: inherit; display: flex; flex-direction: column; gap: 6px; align-items: center;
-  padding: 22px 16px; border-radius: 12px; box-sizing: border-box; transition: background 120ms ease, border-color 120ms ease; }
-.gwb-gate-create { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, transparent); color: var(--dsw-alias-state-success-primary); }
-.gwb-gate-create:hover { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 22%, transparent); }
-.gwb-gate-decline { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, transparent); color: var(--dsw-alias-state-error-primary); }
-.gwb-gate-decline:hover { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 22%, transparent); }
-.gwb-gate-choice:disabled { cursor: default; opacity: 0.55; }
-.gwb-gate-choice-title { font-size: 14.5px; font-weight: 650; }
-.gwb-gate-choice-hint { font-size: 11.5px; color: var(--dsw-alias-label-secondary); }
 .gwb-spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--dsw-alias-border-l3);
   border-top-color: var(--dsw-alias-state-business-primary); animation: gwb-spin 0.8s linear infinite; display: inline-block; vertical-align: -2px; }
 @keyframes gwb-spin { to { transform: rotate(360deg); } }
@@ -450,6 +424,38 @@ window.__ModuleLoader__.load({
       )), document.body)
     }
 
+    // Self-contained stylesheet for the gate overlay: the overlay mounts in
+    // the shell.overlay seat, which renders even when the workbench page (the
+    // usual Styles injector) has never been opened.
+    const GATE_CSS = `
+.gwb-gate-overlay { position: fixed; z-index: 40; display: flex; align-items: center; justify-content: center; }
+.gwb-gate-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  max-width: 560px; width: min(560px, calc(100% - 48px)); box-sizing: border-box; padding: 28px 32px; border-radius: 16px; text-align: center;
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2, #fff) 62%, transparent);
+  backdrop-filter: blur(22px) saturate(1.4); -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent);
+  box-shadow: var(--dsw-elevation-prominent, 0 16px 48px rgba(0,0,0,0.22)); }
+.gwb-gate-close { position: absolute; top: 12px; right: 12px; cursor: pointer; font: inherit; font-size: 14px; line-height: 1;
+  width: 30px; height: 30px; border-radius: 999px; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent); color: var(--dsw-alias-label-secondary);
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent); }
+.gwb-gate-close:hover { color: var(--dsw-alias-label-primary); }
+.gwb-gate-heading { margin: 0 0 4px; font-size: 17px; font-weight: 650; color: var(--dsw-alias-label-primary); }
+.gwb-gate-path { margin: 0 0 14px; font-size: 12.5px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.gwb-gate-choices { display: flex; gap: 14px; width: 100%; }
+.gwb-gate-choice { flex: 1; cursor: pointer; font: inherit; display: flex; flex-direction: column; gap: 6px; align-items: center;
+  padding: 22px 16px; border-radius: 12px; box-sizing: border-box; transition: background 120ms ease, border-color 120ms ease; }
+.gwb-gate-create { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, transparent); color: var(--dsw-alias-state-success-primary); }
+.gwb-gate-create:hover { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 22%, transparent); }
+.gwb-gate-decline { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, transparent); color: var(--dsw-alias-state-error-primary); }
+.gwb-gate-decline:hover { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 22%, transparent); }
+.gwb-gate-choice:disabled { cursor: default; opacity: 0.55; }
+.gwb-gate-choice-title { font-size: 14.5px; font-weight: 650; }
+.gwb-gate-choice-hint { font-size: 11.5px; color: var(--dsw-alias-label-secondary); }
+`
+
     /**
      * Conversation-anchored gate overlay. Anchored over the chat content area
      * (the [data-conversation-content] container): it covers only the
@@ -480,7 +486,8 @@ window.__ModuleLoader__.load({
         if (anchor !== null) observer.observe(anchor)
         return () => { window.removeEventListener('resize', measure); observer.disconnect() }
       }, [gate !== null])
-      if (gate === null || region === null) return null
+      const styleEl = h('style', { 'data-plugin-css': PKG + '-gate', dangerouslySetInnerHTML: { __html: GATE_CSS } })
+      if (gate === null || region === null) return styleEl
       useEffect(() => {
         requestAnimationFrame(() => {
           const el = document.querySelector('.gwb-gate-overlay')
@@ -497,7 +504,7 @@ window.__ModuleLoader__.load({
           console.log('[gwb-gate] ancestors', JSON.stringify(ancestors))
         })
       }, [region])
-      return h('div', {
+      return h(React.Fragment, null, styleEl, h('div', {
         className: 'gwb-gate-overlay',
         role: 'dialog', 'aria-modal': false, 'aria-label': t('gateTitle'),
         style: { top: region.top, left: region.left, width: region.width, height: region.height },
@@ -527,7 +534,7 @@ window.__ModuleLoader__.load({
             ),
           ),
         ),
-      )
+      ))
     }
     // --------------------------------------------------------------- visuals
 

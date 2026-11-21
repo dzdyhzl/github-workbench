@@ -1,6 +1,6 @@
 {
   "name": "@dsh-local/view-11cbfdbc-7886-4863-a239-bb0858fede55",
-  "version": "1.7.3",
+  "version": "1.7.4",
   "private": true,
   "type": "module",
   "description": "GitHub 仓库工作台：左侧栏全局页 + 新会话未关联仓库时的全屏建仓引导弹窗；基于本机 gh CLI；被拒绝的工作区持久化到 ~/.dsh/github-workbench.json（父目录拒绝覆盖整个子树）",

@@ -1300,13 +1300,37 @@ window.__ModuleLoader__.load({
           return await unwrap(await invoke(namespace, method, ...rest))
         } catch (error) {
           // A face adopted from a stale registration routes nowhere (404):
-          // re-mount under this fiber once, then retry the call.
+          // re-mount under this fiber, then retry the call. The registry may
+          // refuse the second mount with "already mounted"/"already
+          // registered"; neither refusal may surface to the page — it only
+          // means a registration still exists, so retry through its face.
           if (!/404|not found/i.test(String(error?.message ?? error))) throw error
-          const remounted = await ctx.remote.$mount(TYPERT_REMOTE)
-          remoteDispose = remounted
-          namespace = ctx.get('remote.githubWorkbench')
-          if (namespace === undefined) throw error
-          return await unwrap(await invoke(namespace, method, ...rest))
+          let lastError = error
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            if (attempt > 1) {
+              await new Promise(resolve => setTimeout(resolve, 400 * attempt))
+              // The stale face still routes nowhere: drop this generation's
+              // own registration (never one adopted from another owner) so
+              // the next mount registers fresh.
+              if (typeof remoteDispose === 'function') {
+                try { remoteDispose() } catch { /* already gone */ }
+                remoteDispose = undefined
+              }
+            }
+            try {
+              const remounted = await ctx.remote.$mount(TYPERT_REMOTE)
+              remoteDispose = remounted
+            } catch { /* refused: a registration still exists; reuse it */ }
+            const face = ctx.get('remote.githubWorkbench')
+            if (face === undefined) continue
+            try {
+              return await unwrap(await invoke(face, method, ...rest))
+            } catch (retryError) {
+              if (!/404|not found/i.test(String(retryError?.message ?? retryError))) throw retryError
+              lastError = retryError
+            }
+          }
+          throw lastError
         }
       }
       const unwrap = async promise => {

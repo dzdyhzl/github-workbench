@@ -9,7 +9,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, parse, resolve } from 'node:path'
 import { writeFileAtomic, withFileLock } from '@deepseek-ai/dsh-atomic-write'
@@ -189,6 +189,13 @@ function declinedCovers(declinedKey, targetKey) {
 /** The persisted store's on-disk location (fixed by the accepted scope). */
 function storePath() {
   return dshHomePath('github-workbench.json')
+}
+
+/** Append one diagnostic line for gate evaluation (best-effort, never throws). */
+function appendGateLog(entry) {
+  try {
+    appendFileSync(dshHomePath('github-workbench.gate.log'), JSON.stringify({ ...entry, at: new Date().toISOString() }) + '\n')
+  } catch { /* diagnostics must never break the gate */ }
 }
 
 function readStore() {
@@ -489,6 +496,7 @@ export class GithubWorkbenchService extends TypertRemoteService {
    */
   async sessionGate(request) {
     const cwd = String(request?.cwd ?? '').trim()
+    appendGateLog({ kind: 'gate.call', cwd })
     if (!isAbsolute(cwd) || !existsSync(cwd)) {
       throw new RemoteError('github-workbench/invalid-workspace', `the workspace directory does not exist: ${cwd}`, { path: cwd })
     }
@@ -506,7 +514,9 @@ export class GithubWorkbenchService extends TypertRemoteService {
     const target = canonicalPath(cwd)
     const covered = listDeclined(store, account).some(row =>
       typeof row.path === 'string' && row.path !== '' && declinedCovers(canonicalPath(row.path), target))
-    return { linked: false, declined: covered, account }
+    const result = { linked: false, declined: covered, account }
+    appendGateLog({ kind: 'gate.result', cwd, ...result })
+    return result
   }
 
   /** Record one declined workspace (exact path, deduplicated, locked write). */

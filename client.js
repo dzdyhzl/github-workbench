@@ -1228,7 +1228,9 @@ window.__ModuleLoader__.load({
               const waitForService = () => {
                 try {
                   const namespace = ctx.get('remote.githubWorkbench')
-                  if (namespace !== undefined) {
+                  // A zombie wrapper without bound methods must not be
+                  // adopted as the face; keep polling for a live one.
+                  if (namespace !== undefined && typeof namespace.status === 'function') {
                     settleRemoteReady.resolve(namespace)
                     return
                   }
@@ -1300,29 +1302,31 @@ window.__ModuleLoader__.load({
           return await unwrap(await invoke(namespace, method, ...rest))
         } catch (error) {
           // A face adopted from a stale registration routes nowhere (404):
-          // re-mount under this fiber, then retry the call. The registry may
-          // refuse the second mount with "already mounted"/"already
-          // registered"; neither refusal may surface to the page — it only
-          // means a registration still exists, so retry through its face.
+          // re-mount under this fiber, then retry the call. Two registry
+          // refusals are routine here and must never surface: "already
+          // mounted"/"already registered" (a registration still exists), and
+          // a face that came back as a dead wrapper without the method
+          // bound (dispose raced the re-registration). Both just mean: keep
+          // retrying with backoff until a live face answers.
           if (!/404|not found/i.test(String(error?.message ?? error))) throw error
           let lastError = error
-          for (let attempt = 1; attempt <= 3; attempt++) {
-            if (attempt > 1) {
-              await new Promise(resolve => setTimeout(resolve, 400 * attempt))
-              // The stale face still routes nowhere: drop this generation's
-              // own registration (never one adopted from another owner) so
-              // the next mount registers fresh.
-              if (typeof remoteDispose === 'function') {
-                try { remoteDispose() } catch { /* already gone */ }
-                remoteDispose = undefined
-              }
+          for (let attempt = 1; attempt <= 5; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 300 * attempt))
+            // Drop this generation's own registration (never one adopted
+            // from another owner) so the next mount registers fresh. Await
+            // the teardown: remounting before it settles re-triggers
+            // "already registered".
+            if (remoteDispose) {
+              try { await Promise.resolve(remoteDispose()) } catch { /* already gone */ }
+              remoteDispose = undefined
             }
             try {
-              const remounted = await ctx.remote.$mount(TYPERT_REMOTE)
-              remoteDispose = remounted
+              remoteDispose = await ctx.remote.$mount(TYPERT_REMOTE)
             } catch { /* refused: a registration still exists; reuse it */ }
             const face = ctx.get('remote.githubWorkbench')
-            if (face === undefined) continue
+            // A face without the method bound is a zombie wrapper from the
+            // just-torn registration; keep polling instead of calling it.
+            if (face === undefined || typeof face[method] !== 'function') continue
             try {
               return await unwrap(await invoke(face, method, ...rest))
             } catch (retryError) {

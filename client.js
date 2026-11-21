@@ -353,7 +353,7 @@ window.__ModuleLoader__.load({
 .gwb-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 70;
   background: var(--dsw-alias-toast-bg, var(--dsw-alias-label-primary)); color: var(--dsw-alias-toast-label, var(--dsw-alias-label-primary-foreground, #fff));
   border-radius: 999px; padding: 8px 18px; font-size: 12.5px; box-shadow: var(--dsw-elevation-prominent, 0 8px 24px rgba(0,0,0,0.2)); }
-.gwb-gate-overlay { position: absolute; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center;
+.gwb-gate-overlay { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--dsw-alias-bg-layer-1, #000) 86%, transparent); backdrop-filter: blur(2px); }
 .gwb-gate-close { position: absolute; top: 18px; right: 22px; cursor: pointer; font: inherit; font-size: 16px; line-height: 1;
   width: 34px; height: 34px; border-radius: 999px; display: flex; align-items: center; justify-content: center;

@@ -1133,6 +1133,9 @@ window.__ModuleLoader__.load({
             { name: 'path', description: 'The recorded workspace path.', source: 'json', codec: stringJson },
             { name: 'remark', description: 'The new remark text.', source: 'json', codec: stringJson },
           ]),
+        'githubWorkbench/clientPing': method('githubWorkbench',
+          'Diagnostic ping from the client build.',
+          [{ name: 'build', description: 'Client build marker.', source: 'json', codec: stringJson }]),
         'githubWorkbench/sessionGate': method('githubWorkbench',
           'Gate facts for one working directory: github origin and declined coverage.',
           [{ name: 'request', description: 'cwd and an optional account hint.', source: 'json', codec: requestJson }]),
@@ -1204,6 +1207,10 @@ window.__ModuleLoader__.load({
           })
       }, 'github-workbench: remote mount')
       remoteReady.catch(() => { /* failures surface through API calls */ })
+      // Diagnostic: report which client build is live in this browser (temporary).
+      ctx.effect(() => {
+        void api.clientPing('gate-1.1.2').catch(() => { /* diagnostics only */ })
+      }, 'github-workbench: client ping')
 
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'github-workbench: dictionaries')
       const t = ctx.locale.bind(NS)
@@ -1238,6 +1245,7 @@ window.__ModuleLoader__.load({
         declinedRemove: (account, path) => call('declinedRemove', account, path),
         sessionGate: request => call('sessionGate', request),
         declinedAdd: (account, cwd) => call('declinedAdd', account, cwd),
+        clientPing: build => call('clientPing', build),
       }
 
       const openOne = async workspaceId => {

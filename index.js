@@ -12,7 +12,8 @@ import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, parse, resolve } from 'node:path'
-import { writeFileAtomic, withFileLock } from '@deepseek-ai/dsh-atomic-write'
+import { writeFileManaged } from '../shared/agents-block/index.js'
+import { mutateJson } from '../shared/local-store/index.js'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 
@@ -182,6 +183,50 @@ function declinedCovers(declinedKey, targetKey) {
 /** The persisted store's on-disk location (fixed by the accepted scope). */
 function storePath() {
   return dshHomePath('github-workbench.json')
+}
+
+// ------------------------------------------------------------- push reminder
+
+/**
+ * Managed AGENTS.md block written after a repository is created or linked.
+ * DSH loads AGENTS.md from the workspace root into the agent's system prompt
+ * (dsh-agent-instructions), so the reminder reaches every session here. The
+ * block is delimited: updates rewrite only what sits between the markers and
+ * never touch the user's own content.
+ */
+const PUSH_REMINDER_MARKERS = { start: '<!-- github-workbench:start', end: '<!-- github-workbench:end' }
+
+const PUSH_REMINDER_BLOCK = [
+  `${PUSH_REMINDER_MARKERS.start} (managed block; edits between these markers are overwritten) -->`,
+  '## GitHub 同步提醒（github-workbench）',
+  '',
+  '- 本工作区已关联 GitHub 远程仓库（remote origin）。',
+  '- 每次对项目做出改动并完成任务后，必须提交并推送到远程：先 git add 相关文件并 commit（写清改动摘要），再 git push；不要把推送留给用户手动收尾。',
+  '- 多轮任务中若产生了未推送的提交，在回合结束前检查 git status 与未推送分支（git log origin/main..HEAD），有未推送提交就补推。',
+  `${PUSH_REMINDER_MARKERS.end} -->`,
+].join('\n')
+
+/**
+ * Write (or refresh) the push reminder in the workspace's AGENTS.md.
+ * Best-effort: a failure is reported in the response but never blocks the
+ * repository flow — creating/linking must succeed even when the file write
+ * cannot (read-only directory, permission problems).
+ */
+async function writePushReminder(cwd) {
+  const file = join(cwd, 'AGENTS.md')
+  try {
+    // Shared managed-block routine: locked atomic upsert with dangling-marker
+    // repair; refresh when the block is missing, incomplete, or stale.
+    const result = await writeFileManaged(file, PUSH_REMINDER_MARKERS, () => PUSH_REMINDER_BLOCK, (existing, complete) => {
+      if (!complete) return true
+      return !existing.includes('git push')
+    })
+    appendGateLog({ kind: 'push-reminder.write', cwd, created: result.created, refreshed: result.refreshed })
+    return { written: result.written, created: result.created, file: 'AGENTS.md' }
+  } catch (error) {
+    appendGateLog({ kind: 'push-reminder.fail', cwd, message: firstLine(error?.message) ?? 'write failed' })
+    return { written: false, file: 'AGENTS.md' }
+  }
 }
 
 /** Append one diagnostic line for gate evaluation (best-effort, never throws). */
@@ -378,11 +423,13 @@ export class GithubWorkbenchService extends TypertRemoteService {
     const printedUrl = (created.stdout.split('\n').find(line => /^https:\/\//.test(line.trim())) ?? '').trim()
     appendGateLog({ kind: 'create.ok', name, url: printedUrl })
     const url = printedUrl !== '' ? printedUrl : `${PAGE_BASE}/${owner}/${name}`
+    const reminder = link ? await writePushReminder(cwd) : { written: false, file: 'AGENTS.md' }
     return {
       owner,
       name,
       url,
       linked: link,
+      pushReminder: reminder,
       followUp: [
         ...(initializedHere ? [`git -C "${cwd}" init -b main  # done automatically`] : []),
         ...(link
@@ -433,7 +480,8 @@ export class GithubWorkbenchService extends TypertRemoteService {
     if (added === null) {
       throw new RemoteError('github-workbench/git-failed', `git remote add origin failed for ${cwd}`, { path: cwd })
     }
-    return { owner, name, url, linked: true, followUp: ['git push -u origin main  # after your first commit'] }
+    const reminder = await writePushReminder(cwd)
+    return { owner, name, url, linked: true, pushReminder: reminder, followUp: ['git push -u origin main  # after your first commit'] }
   }
 
   /**
@@ -551,18 +599,17 @@ export class GithubWorkbenchService extends TypertRemoteService {
     return { account: key, path: raw, added: true }
   }
 
-  /** Serialized read-modify-write on the shared JSON file. */
+  /** Serialized read-modify-write on the shared JSON file (via the shared local-store toolkit). */
   async mutateStore(change) {
     const file = storePath()
-    const result = await withFileLock(file, async () => {
-      const store = readStore()
-      if (store.malformed) {
+    try {
+      await mutateJson(file, async (store) => change(store ?? { declined: {} }), { waitMs: STORE_LOCK_WAIT_MS })
+    } catch (error) {
+      if (/not valid JSON/.test(String(error?.message))) {
         throw new RemoteError('github-workbench/store-malformed', `${file} is not valid JSON; fix or delete the file before editing declined workspaces`, {})
       }
-      const next = change(store)
-      await writeFileAtomic(file, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
-      return next
-    }, { waitMs: STORE_LOCK_WAIT_MS })
+      throw error
+    }
     return { storePath: file }
   }
 }
@@ -650,6 +697,7 @@ function run(argv) {
 }
 
 
+markRemote(GithubWorkbenchService.prototype, 'status')
 markRemote(GithubWorkbenchService.prototype, 'switchAccount')
 markRemote(GithubWorkbenchService.prototype, 'repositories')
 markRemote(GithubWorkbenchService.prototype, 'createRepository')

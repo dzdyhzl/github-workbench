@@ -80,6 +80,8 @@ window.__ModuleLoader__.load({
       createRename: '改名重建',
       createLinkExisting: '关联已有仓库',
       createSuccess: '已创建 {url}。请完成首次提交后推送：',
+      reminderCreated: '已在工作区 {file} 写入推送提醒（DSH 会在本工作区的每个会话中读取）：改动后必须提交并推送。',
+      reminderRefreshed: '已更新工作区 {file} 中的推送提醒：改动后必须提交并推送。',
       createFailed: '操作失败：{message}',
       declinedTitle: '被拒绝建仓的工作区',
       declinedAccount: '当前账户：{account}',
@@ -182,6 +184,8 @@ window.__ModuleLoader__.load({
       createRename: 'Rename and create',
       createLinkExisting: 'Link the existing repository',
       createSuccess: 'Created {url}. Push after your first commit:',
+      reminderCreated: 'A push reminder was written to {file} in the workspace (DSH reads it in every session here): commit and push after every change.',
+      reminderRefreshed: 'The push reminder in {file} was refreshed: commit and push after every change.',
       createFailed: 'Operation failed: {message}',
       declinedTitle: 'Workspaces that declined repository creation',
       declinedAccount: 'Current account: {account}',
@@ -307,6 +311,7 @@ window.__ModuleLoader__.load({
 .gwb-card-name { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gwb-card-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 3px; font-size: 12px; color: var(--dsw-alias-label-secondary); }
 .gwb-badge { border-radius: 999px; padding: 1px 8px; font-size: 11px; border: 0.5px solid var(--dsw-alias-border-l3); color: var(--dsw-alias-label-secondary); white-space: nowrap; }
+.gwb-reminder-note { margin: 4px 0 0; font-size: 12px; color: var(--dsw-alias-text-secondary, inherit); }
 .gwb-badge-linked { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent); color: var(--dsw-alias-state-success-primary); border-color: transparent; }
 .gwb-visibility-btn { cursor: pointer; font: inherit; font-size: 11px; background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 16%, transparent); color: var(--dsw-alias-state-error-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent); }
 .gwb-visibility-btn:hover { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 32%, transparent); color: var(--dsw-alias-state-error-primary); }
@@ -617,6 +622,12 @@ window.__ModuleLoader__.load({
           ? [
               h('p', { key: 'ok', className: 'gwb-success' }, t('createSuccess', { url: result.url })),
               h('pre', { key: 'cmds', className: 'gwb-pre' }, (result.followUp ?? []).join('\n')),
+              result.pushReminder?.written === true
+                ? h('p', { key: 'reminder', className: 'gwb-reminder-note' },
+                    result.pushReminder.created === true
+                      ? t('reminderCreated', { file: result.pushReminder.file })
+                      : t('reminderRefreshed', { file: result.pushReminder.file }))
+                : null,
             ]
           : phase === 'exists'
             ? [
@@ -1436,6 +1447,8 @@ window.__ModuleLoader__.load({
         },
       }
       // The list subscription is the activity sensor: the current main-view
+      // Canonical algorithm lives at shared/session-gate/index.js (tested); keep
+      // this copy in sync when editing the sensor heuristics.
       // session's first message moves its updatedAt; from then on the gate is
       // evaluated exactly once for that session. Switching conversations
       // silently drops a visible prompt (no blacklist write, not dismissed).

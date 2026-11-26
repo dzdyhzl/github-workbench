@@ -19,9 +19,9 @@ import { RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protoc
 
 /** Read-modify-write lock wait for the shared JSON file, in milliseconds. */
 const STORE_LOCK_WAIT_MS = 5_000
-/** Hard cap for one `gh` invocation; the UI refreshes long pages itself. */
+/** Hard cap for one child invocation; the UI refreshes long pages itself. */
 const GH_TIMEOUT_MS = 45_000
-/** In-memory output cap per stream of one `gh` invocation. */
+/** In-memory output cap per stream of one child invocation. */
 const GH_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 /** Environment names that must not reach the `gh` child. */
 const SENSITIVE_ENV = /KEY|PASSWORD|SECRET|TOKEN/i
@@ -73,20 +73,21 @@ function withProfileEnv(env) {
 }
 
 /**
- * Run one `gh` command to completion with a scrubbed environment.
- * Resolves `{ exitCode, stdout, stderr }`; rejects when `gh` cannot start.
+ * Run one child process to completion with a scrubbed profile environment.
+ * Resolves `{ exitCode, stdout, stderr }`; rejects when the process cannot
+ * start, times out, or is terminated.
  */
-function runGh(args, timeoutMs = GH_TIMEOUT_MS) {
+function runProcess(argv, timeoutMs = GH_TIMEOUT_MS) {
   return new Promise((resolvePromise, reject) => {
     let child
     try {
-      child = spawn('gh', args, {
+      child = spawn(argv[0], argv.slice(1), {
         env: { ...withProfileEnv(scrubbedParentEnv()), GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_PAGER: '', NO_COLOR: '1', CLICOLOR: '0' },
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
     } catch (error) {
-      reject(new Error(`gh could not start: ${error?.message ?? String(error)}`))
+      reject(new Error(`${argv[0]} could not start: ${error?.message ?? String(error)}`))
       return
     }
     const out = []
@@ -102,7 +103,7 @@ function runGh(args, timeoutMs = GH_TIMEOUT_MS) {
     }
     const timer = setTimeout(() => {
       try { child.kill('SIGKILL') } catch {}
-      settle(reject, new Error(`gh ${args[0]} timed out after ${timeoutMs}ms`))
+      settle(reject, new Error(`${argv.join(' ')} timed out after ${timeoutMs}ms`))
     }, timeoutMs)
     child.stdout.on('data', chunk => {
       outBytes += chunk.length
@@ -112,11 +113,11 @@ function runGh(args, timeoutMs = GH_TIMEOUT_MS) {
       errBytes += chunk.length
       if (errBytes <= GH_MAX_OUTPUT_BYTES) err.push(chunk)
     })
-    child.on('error', error => settle(reject, new Error(`gh could not start: ${error.message}`)))
+    child.on('error', error => settle(reject, new Error(`${argv[0]} could not start: ${error.message}`)))
     child.on('close', exitCode => {
       const text = chunks => Buffer.concat(chunks).toString('utf8').replace(/\r\n/g, '\n').replace(/\n$/, '')
       if (exitCode === null) {
-        settle(reject, new Error(`gh ${args[0]} exited without a status (terminated)`))
+        settle(reject, new Error(`${argv.join(' ')} exited without a status (terminated)`))
         return
       }
       settle(resolvePromise, { exitCode, stdout: text(out), stderr: text(err) })
@@ -130,7 +131,7 @@ function ghFailure(action, result) {
 }
 
 async function ghJson(args) {
-  const result = await runGh(args)
+  const result = await runProcess(args)
   if (result.exitCode !== 0) ghFailure(args.join(' '), result)
   try {
     return JSON.parse(result.stdout)
@@ -169,15 +170,6 @@ function canonicalPath(raw) {
   return process.platform === 'win32'
     ? parsed.root.toUpperCase() + value.slice(parsed.root.length).replace(/[\\/]+$/, '')
     : value.replace(/\/+$/, '')
-}
-
-/**
- * Whether one canonical declined path covers another. Declining a folder
- * records exactly that path; a parent entry does not silence its child
- * directories — each declined folder answers only for itself.
- */
-function declinedCovers(declinedKey, targetKey) {
-  return declinedKey === targetKey
 }
 
 /** The persisted store's on-disk location (fixed by the accepted scope). */
@@ -306,7 +298,7 @@ export class GithubWorkbenchService extends TypertRemoteService {
   /** Detect gh availability and enumerate signed-in accounts. */
   async status() {
     try {
-      const result = await runGh(['auth', 'status', '--json', 'hosts'], 15_000)
+      const result = await runProcess(['auth', 'status', '--json', 'hosts'], 15_000)
       if (result.exitCode !== 0) {
         return { ghAvailable: true, signedIn: false, accounts: [], activeAccount: null, diagnostic: firstLine(result.stderr) || firstLine(result.stdout) }
       }
@@ -327,7 +319,7 @@ export class GithubWorkbenchService extends TypertRemoteService {
   async switchAccount(account) {
     const login = String(account ?? '').trim()
     if (login === '') throw new RemoteError('github-workbench/invalid-account', 'an account login is required', {})
-    const result = await runGh(['auth', 'switch', '-u', login, '-h', 'github.com'], 30_000)
+    const result = await runProcess(['auth', 'switch', '-u', login, '-h', 'github.com'], 30_000)
     if (result.exitCode !== 0) ghFailure(`auth switch -u ${login}`, result)
     return { switched: login }
   }
@@ -369,7 +361,7 @@ export class GithubWorkbenchService extends TypertRemoteService {
     if (owner === '' || repo === '' || /[^\w.-]/.test(repo)) {
       throw new RemoteError('github-workbench/invalid-repository', 'a repository owner and a plain repository name are required', {})
     }
-    const result = await runGh(['repo', 'view', `${owner}/${repo}`, '--json', 'name'], 20_000)
+    const result = await runProcess(['repo', 'view', `${owner}/${repo}`, '--json', 'name'], 20_000)
     return { exists: result.exitCode === 0 }
   }
 
@@ -391,7 +383,7 @@ export class GithubWorkbenchService extends TypertRemoteService {
     if (name === '' || /[^\w.-]/.test(name)) {
       throw new RemoteError('github-workbench/invalid-repository', 'the repository name must be a plain GitHub repository name', { name })
     }
-    const whoami = await runGh(['api', 'user', '--jq', '.login'], 20_000)
+    const whoami = await runProcess(['api', 'user', '--jq', '.login'], 20_000)
     if (whoami.exitCode !== 0) ghFailure('api user', whoami)
     const owner = whoami.stdout.trim()
     if (owner === '') throw new RemoteError('github-workbench/gh-failed', 'gh api user returned no login', { action: 'api user' })
@@ -415,7 +407,7 @@ export class GithubWorkbenchService extends TypertRemoteService {
     if (description !== '') args.push('--description', description)
     if (link) args.push('--source', cwd, '--remote', 'origin')
     // gh repo create prints the new repository URL (plain text), not JSON.
-    const created = await runGh(args)
+    const created = await runProcess(args)
     if (created.exitCode !== 0) {
       appendGateLog({ kind: 'create.fail', name, message: firstLine(created.stderr) || `exit ${created.exitCode}` })
       ghFailure(args.join(' '), created)
@@ -501,7 +493,7 @@ export class GithubWorkbenchService extends TypertRemoteService {
     if (visibility === '') {
       throw new RemoteError('github-workbench/invalid-visibility', 'visibility must be \'public\' or \'private\'', { visibility: String(request?.visibility ?? '') })
     }
-    const result = await runGh(['repo', 'edit', `${owner}/${name}`, '--visibility', visibility, '--accept-visibility-change-consequences'], 30_000)
+    const result = await runProcess(['repo', 'edit', `${owner}/${name}`, '--visibility', visibility, '--accept-visibility-change-consequences'], 30_000)
     if (result.exitCode !== 0) ghFailure(`repo edit ${owner}/${name}`, result)
     return { owner, name, visibility }
   }
@@ -566,15 +558,17 @@ export class GithubWorkbenchService extends TypertRemoteService {
     let account = normalizeAccountKey(request?.account)
     if (account === '') {
       // --jq emits the bare login string, not JSON; read stdout directly.
-      const whoami = await runGh(['api', 'user', '--jq', '.login'], 20_000)
+      const whoami = await runProcess(['api', 'user', '--jq', '.login'], 20_000)
       if (whoami.exitCode !== 0) ghFailure('api user', whoami)
       account = normalizeAccountKey(whoami.stdout)
     }
     const store = readStore()
     if (store.malformed) return { linked: false, declined: false, account }
     const target = canonicalPath(cwd)
+    // Exact canonical equality: declining a parent never silences its child
+    // directories — each declined folder answers only for itself.
     const covered = listDeclined(store, account).some(row =>
-      typeof row.path === 'string' && row.path !== '' && declinedCovers(canonicalPath(row.path), target))
+      typeof row.path === 'string' && row.path !== '' && canonicalPath(row.path) === target)
     const result = { linked: false, declined: covered, account }
     appendGateLog({ kind: 'gate.result', cwd, ...result })
     return result
@@ -656,44 +650,14 @@ async function originOfWorkspace(path) {
   return classifyOrigin(result)
 }
 
-/** spawn helper that resolves null instead of throwing when git is absent. */
+/**
+ * Spawn one short-lived git helper; resolves its trimmed stdout, or null on
+ * any failure (git absent, non-zero exit, timeout, termination).
+ */
 function run(argv) {
-  return new Promise(resolvePromise => {
-    let child
-    try {
-      child = spawn(argv[0], argv.slice(1), {
-        env: withProfileEnv(scrubbedParentEnv()),
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-    } catch {
-      resolvePromise(null)
-      return
-    }
-    const out = []
-    const err = []
-    let settled = false
-    const finish = value => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolvePromise(value)
-    }
-    const timer = setTimeout(() => {
-      try { child.kill('SIGKILL') } catch {}
-      finish(null)
-    }, 10_000)
-    child.stdout.on('data', chunk => out.push(chunk))
-    child.stderr.on('data', chunk => err.push(chunk))
-    child.on('error', () => finish(null))
-    child.on('close', exitCode => {
-      if (exitCode !== 0) {
-        finish(null)
-        return
-      }
-      finish(Buffer.concat(out).toString('utf8').trim())
-    })
-  })
+  return runProcess(argv, 10_000)
+    .then(result => (result.exitCode === 0 ? result.stdout.trim() : null))
+    .catch(() => null)
 }
 
 

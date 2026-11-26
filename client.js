@@ -64,8 +64,6 @@ window.__ModuleLoader__.load({
       candidateTitle: '选择要打开的工作区',
       candidateByRecent: '按最近使用排序',
       openWorkspace: '打开',
-      sessionCreated: '已创建并打开会话',
-      sessionManual: '已跳转到工作区，请手动新建会话',
       createTitle: '为工作区创建 GitHub 仓库',
       createWorkspace: '工作区',
       createName: '仓名',
@@ -119,7 +117,6 @@ window.__ModuleLoader__.load({
       visibilityChangePrivateBody: '私有后，该仓库仅你和被授权的协作者可见；已绑定的 GitHub Pages 站点会下线，公开链接将失效。',
       visibilityChangeConfirm: '确认修改',
       visibilityChanged: '可见性已更新：{owner}/{name} 现为{visibility}',
-      visibilityNoPermission: '没有管理权限，无法修改可见性',
     }
 
     const en = {
@@ -163,13 +160,10 @@ window.__ModuleLoader__.load({
       updated: 'Updated {time}',
       linkedOne: 'Linked to 1 workspace',
       linkedMany: 'Linked to {n} workspaces',
-      notLinked: 'No local workspace linked',
       openOnGithub: 'Open on GitHub',
       candidateTitle: 'Choose a workspace to open',
       candidateByRecent: 'Sorted by recent use',
       openWorkspace: 'Open',
-      sessionCreated: 'Session created and opened',
-      sessionManual: 'Moved to the workspace; create the session manually',
       createTitle: 'Create a GitHub repository for a workspace',
       createWorkspace: 'Workspace',
       createName: 'Repository name',
@@ -223,7 +217,6 @@ window.__ModuleLoader__.load({
       visibilityChangePrivateBody: 'Once private, only you and authorized collaborators can see it; attached GitHub Pages sites go offline and public links stop working.',
       visibilityChangeConfirm: 'Change visibility',
       visibilityChanged: 'Visibility updated: {owner}/{name} is now {visibility}',
-      visibilityNoPermission: 'No admin permission; visibility cannot be changed',
     }
 
     function makeT(locale) {
@@ -370,7 +363,7 @@ window.__ModuleLoader__.load({
 
     // ----------------------------------------------------------- primitives
 
-    /** Minimal snapshot store for the fullscreen gate overlay request. */
+    /** Minimal nullable snapshot store shared by the overlay and page requests. */
     function createGateStore() {
       let current = null
       const listeners = new Set()
@@ -382,21 +375,6 @@ window.__ModuleLoader__.load({
           dismiss() { current = null; publish() },
         },
         set(next) { current = next; publish() },
-      }
-    }
-
-    /** Minimal snapshot store for the pending multi-workspace candidate request. */
-    function createCandidateStore() {
-      let current = null
-      const listeners = new Set()
-      const publish = () => { for (const listener of [...listeners]) listener() }
-      return {
-        source: {
-          getSnapshot: () => current,
-          subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
-        },
-        request(value) { current = value; publish() },
-        dismiss() { current = null; publish() },
       }
     }
 
@@ -749,19 +727,16 @@ window.__ModuleLoader__.load({
         }
       }, [api, accountKey])
 
-      // Gate detection runs on mount and after every recheck press.
-      useEffect(() => {
-        let cancelled = false
+      // Status detection runs on mount; the recheck press reuses the same
+      // callback (a settled status update after unmount is a React no-op).
+      const loadStatus = useCallback(() => {
         setStatus({ phase: 'loading' })
         api.status().then(data => {
-          if (cancelled) return
           setStatus({ phase: 'ready', data })
           if (data.signedIn) startedRef.current = true
-        }).catch(error => {
-          if (!cancelled) setStatus({ phase: 'error', message: error?.message ?? String(error) })
-        })
-        return () => { cancelled = true }
+        }).catch(error => setStatus({ phase: 'error', message: error?.message ?? String(error) }))
       }, [api])
+      useEffect(loadStatus, [loadStatus])
 
       const fetchPage = useCallback(async (nextPage, replace) => {
         setListState({ phase: 'loading' })
@@ -841,13 +816,7 @@ window.__ModuleLoader__.load({
         setConfirmSwitch(login)
       }, [switchConfirmedOnce, switchAccount])
 
-      const recheck = useCallback(() => {
-        setStatus({ phase: 'loading' })
-        api.status().then(data => {
-          setStatus({ phase: 'ready', data })
-          if (data.signedIn) startedRef.current = true
-        }).catch(error => setStatus({ phase: 'error', message: error?.message ?? String(error) }))
-      }, [api])
+      const recheck = loadStatus
 
       const filtered = useMemo(() => {
         const needle = query.trim().toLowerCase()
@@ -1208,7 +1177,6 @@ window.__ModuleLoader__.load({
       // entry points. The mount settles in the background: this apply stays
       // synchronous so the page and its sidebar entry always register, and
       // every API call awaits the mount before its first request.
-      let remoteMounted = false
       let remoteDispose
       let remoteFailure
       let settleRemoteReady
@@ -1219,7 +1187,6 @@ window.__ModuleLoader__.load({
         Promise.resolve()
           .then(() => ctx.remote.$mount(TYPERT_REMOTE))
           .then(dispose => {
-            remoteMounted = true
             remoteDispose = dispose
             // Resolve with the namespace service face read through the
             // registered service key, not the context accessor.
@@ -1230,7 +1197,6 @@ window.__ModuleLoader__.load({
             // generation of this page still owns the namespace: keep polling
             // until that namespace service is reachable, then proceed.
             if (String(error?.message ?? error).includes('already registered')) {
-              remoteMounted = true
               // A previous generation still owns the namespace. Poll for its
               // face briefly; if the stale owner dies (page reload after a
               // plugin update), re-attempt the mount instead of failing the
@@ -1251,7 +1217,6 @@ window.__ModuleLoader__.load({
                   Promise.resolve()
                     .then(() => ctx.remote.$mount(TYPERT_REMOTE))
                     .then(dispose => {
-                      remoteMounted = true
                       remoteDispose = dispose
                       settleRemoteReady.resolve(ctx.get('remote.githubWorkbench'))
                     }, retryError => {
@@ -1279,7 +1244,6 @@ window.__ModuleLoader__.load({
                 Promise.resolve()
                   .then(() => ctx.remote.$mount(TYPERT_REMOTE))
                   .then(dispose => {
-                    remoteMounted = true
                     remoteDispose = dispose
                     settleRemoteReady.resolve(ctx.get('remote.githubWorkbench'))
                   }, retryError => {
@@ -1387,7 +1351,7 @@ window.__ModuleLoader__.load({
         await uiWorkspace.openWorkspace(workspaceId)
       }
 
-      const candidateStore = createCandidateStore()
+      const candidateStore = createGateStore()
       const gateStore = createGateStore()
       const createRequestStore = createGateStore()
       // A dismissed path stays quiet for this browser session even if the gate
@@ -1399,7 +1363,6 @@ window.__ModuleLoader__.load({
       // value, i.e. the first message has been sent). Not linked and not
       // declined -> raise the request overlay; anything else stays silent.
       let gateShownSessionId
-      let gateShownDismissed = false
       const evaluateGate = async currentSession => {
         const snapshot = ctx.get('workspaces')?.list?.getSnapshot()
         if (snapshot === undefined) return
@@ -1413,7 +1376,6 @@ window.__ModuleLoader__.load({
           const result = await api.sessionGate({ cwd: path, account })
           if (result.linked === true || result.declined === true || gateDismissed.has(path)) return
           gateShownSessionId = currentSession.id
-          gateShownDismissed = false
           gateStore.set({ path, account: result.account ?? account, busy: false, sessionId: currentSession.id })
         } catch {
           // Gate is best-effort: a failed probe never blocks the conversation.
@@ -1442,7 +1404,7 @@ window.__ModuleLoader__.load({
             gateDismissed.add(gate.path)
             gateStore.set(null)
           } catch (error) {
-            gateStore.set({ ...gate, busy: false, error: makeT(ctx.locale.getSnapshot().active === 'zh' ? 'zh' : 'en')('gateDeclineFailed', { message: error?.message ?? String(error) }) })
+            gateStore.set({ ...gate, busy: false, error: t('gateDeclineFailed', { message: error?.message ?? String(error) }) })
           }
         },
       }
@@ -1468,7 +1430,6 @@ window.__ModuleLoader__.load({
             // write, not dismissed) and re-baseline for the new session.
             if (gateShownSessionId !== undefined && gateShownSessionId !== currentSession.id) {
               gateShownSessionId = undefined
-              gateShownDismissed = false
               gateStore.set(null)
             }
             currentId = currentSession.id
@@ -1514,7 +1475,7 @@ window.__ModuleLoader__.load({
           }
           return latest
         }
-        candidateStore.request({ repo, workspaces: [...resolved].sort((a, b) => latestUse(b) - latestUse(a)) })
+        candidateStore.set({ repo, workspaces: [...resolved].sort((a, b) => latestUse(b) - latestUse(a)) })
       }
 
       const injected = () => ({
